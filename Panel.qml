@@ -315,7 +315,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    tooltipText: "Monthly log"
+    tooltipText: "Monthly calendar"
     onPressed: function(b) { root.toggle() }
 
     // Drawn rather than set from the font: no single-bullet glyph exists in
