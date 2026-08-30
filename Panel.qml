@@ -148,6 +148,12 @@ Panel {
   // and chevrons do.
   readonly property color awayMonthColor: Util.alpha(fg, 0.75)
 
+  // Facing-page box titles. Full-strength foreground put them at exactly the
+  // weight of the lines underneath, so the eye read them as a first entry
+  // rather than a heading. Larger than the entries and held back a little is
+  // what separates the two -- uppercase and letterspacing alone did not.
+  readonly property color sectionTitleColor: Util.alpha(fg, 0.7)
+
   // ---------------------------------------------------------------- entries
 
   function contentFor(dateKey) {
@@ -455,12 +461,13 @@ Panel {
           id: bullet
           anchors.centerIn: parent
           // The reference cartridge is 0.3265 wide for its height. Held to
-          // that it comes out 9px in the bar, which reads thin beside the
-          // neighbouring icons, so the width stays where it was tuned and the
-          // round is a little stouter than the photo. Every other proportion
-          // -- nose, cannelure, case, rim -- is the reference's own.
-          height: 2 * Math.round(parent.height * 0.36)
-          width: Math.round(2 * Math.round(parent.width * 0.15) * 1.1)
+          // that it reads thin beside the neighbouring icons, so it carries a
+          // stouter 0.40 and the width is derived from the height rather than
+          // tuned separately -- the two then stay in step when the size moves.
+          // Every other proportion -- nose, cannelure, case, rim -- is the
+          // reference's own.
+          height: 2 * Math.round(parent.height * 0.42)
+          width: Math.round(height * 0.40)
           antialiasing: true
 
           ShapePath {
@@ -933,9 +940,9 @@ Panel {
               anchors.left: parent.left
               text: box.modelData.title.toUpperCase()
               font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.subtitle
               font.letterSpacing: Style.space(1)
-              color: root.fg
+              color: root.sectionTitleColor
             }
 
             Rectangle {
