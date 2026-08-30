@@ -28,7 +28,7 @@ omarchy plugin update pyang.journal
 By default, one note per month at:
 
 ```
-~/Documents/Obsidian/Monthly Log/2026-08.md
+~/Documents/Obsidian/Monthly Calendar/2026-08.md
 ```
 
 **If your vault is somewhere else, point it there** in

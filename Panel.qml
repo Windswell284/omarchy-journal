@@ -29,7 +29,7 @@ Panel {
   //      vault can move without touching this file.
   readonly property string home: Quickshell.env("HOME")
   readonly property string vaultDir: setting("vault", home + "/Documents/Obsidian")
-  readonly property string folder: setting("folder", "Monthly Log")
+  readonly property string folder: setting("folder", "Monthly Calendar")
   readonly property string journalDir: vaultDir + "/" + folder
 
   // ---- Today, kept honest across midnight by SystemClock so the marked row
