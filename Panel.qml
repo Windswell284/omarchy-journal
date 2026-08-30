@@ -886,8 +886,10 @@ Panel {
         anchors.left: spine.right
         anchors.leftMargin: root.spineGap
         anchors.right: parent.right
+        // Flush with the top of the log, not below its heading: each box then
+        // carries a title band of exactly the heading's height, which lands
+        // its rule on the same line the days hang from.
         anchors.top: parent.top
-        anchors.topMargin: root.headerHeight - Style.space(18)
         anchors.bottom: footer.top
         anchors.bottomMargin: Style.space(4)
 
@@ -907,6 +909,13 @@ Panel {
             required property int index
 
             // Handle for focusSection() above.
+            // The top row's title band is the heading's own height, so its
+            // rule sits exactly on the left page's. The lower row has no such
+            // partner and just needs room for its title.
+            readonly property int titleBand: box.modelData.row === 0
+              ? root.headerHeight
+              : Math.round(root.headerHeight * 0.62)
+
             // Enough slots to rule the box out, plus room to keep typing.
             // `grown` only ever goes up, so pressing Return on the last line
             // adds one rather than swallowing the keystroke.
@@ -936,7 +945,8 @@ Panel {
 
             Text {
               id: boxTitle
-              anchors.top: parent.top
+              anchors.bottom: boxRule.top
+              anchors.bottomMargin: Style.space(5)
               anchors.left: parent.left
               text: box.modelData.title.toUpperCase()
               font.family: root.fontFamily
@@ -945,10 +955,13 @@ Panel {
               color: root.sectionTitleColor
             }
 
+            // Positioned first, with the title hung above it, so the rule is
+            // the thing that lands on a known line rather than wherever the
+            // title's height happens to push it.
             Rectangle {
               id: boxRule
-              anchors.top: boxTitle.bottom
-              anchors.topMargin: Style.space(5)
+              anchors.top: parent.top
+              anchors.topMargin: box.titleBand - height
               width: parent.width
               height: Math.max(1, Style.space(1))
               color: root.weekRuleColor
@@ -957,6 +970,9 @@ Panel {
             Item {
               id: writingArea
               anchors.top: boxRule.bottom
+              // Same gap the day list leaves under the heading rule, so the
+              // two pages' lines stay in register the whole way down.
+              anchors.topMargin: Style.space(4)
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: parent.bottom
