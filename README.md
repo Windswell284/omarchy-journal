@@ -73,6 +73,7 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `{` / `}` | Previous / next year |
 | `s` | Open or close the facing page |
 | `1` `2` `3` `4` | Jump into a facing-page box (opens it first if shut) |
+| `Enter` / `Up` / `Down` | Move between lines inside a box |
 | `Tab` | Switch to the neighbouring bar panel |
 
 The wheel scrolls the days continuously. Clicking the month name returns to

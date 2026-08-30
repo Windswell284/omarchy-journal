@@ -125,12 +125,6 @@ Panel {
   readonly property int gutterWidth: Style.space(15)
   readonly property int letterWidth: Style.space(12)
   readonly property int spineGap: Style.space(14)
-  // TextEdit exposes no line-height control of any kind (lineCount and
-  // contentHeight are all it has), so the only way to open the ruling up while
-  // keeping typed text landing ON the rules is to give the facing page its own
-  // slightly larger type and let the metrics carry the pitch with it.
-  readonly property int sectionFontSize: Math.round(Style.font.body * 1.25)
-  readonly property int sectionLineHeight: Math.round(bodyMetrics.height)
 
   // The card pads its own edges, and the heading and footer each centre inside
   // their own band, so both drift toward the middle of the panel: the month
@@ -176,6 +170,27 @@ Panel {
     root.sectionText[sectionSlot(monthKey, id)] = text
     root.dirtyMonths[monthKey] = true
     saveTimer.restart()
+  }
+
+  function sectionLines(monthKey, id) {
+    var text = sectionFor(monthKey, id)
+    return text === "" ? [] : text.split("\n")
+  }
+
+  function sectionLineAt(monthKey, id, index) {
+    var lines = sectionLines(monthKey, id)
+    return index >= 0 && index < lines.length ? lines[index] : ""
+  }
+
+  function setSectionLine(monthKey, id, index, text) {
+    if (root.loading) return
+    var lines = sectionLines(monthKey, id)
+    while (lines.length <= index) lines.push("")
+    if (lines[index] === text) return
+    lines[index] = text
+    // Trailing blanks are an artefact of the ruling, not content.
+    while (lines.length > 0 && lines[lines.length - 1].replace(/\s/g, "") === "") lines.pop()
+    setSection(monthKey, id, lines.join("\n"))
   }
 
   function sectionsOf(monthKey) {
@@ -296,7 +311,7 @@ Panel {
     root.spreadOpen = true
     Qt.callLater(function() {
       var box = sectionBoxes.itemAt(index)
-      if (box && box.field) box.field.forceActiveFocus()
+      if (box && box.focusLine) box.focusLine(0)
     })
   }
 
@@ -374,14 +389,6 @@ Panel {
     function toggle(): void { root.toggle() }
     function spread(): void { root.openSpread() }
     function toggleSpread(): void { root.toggleSpread() }
-  }
-
-  // The line spacing TextEdit will actually lay text out on, so the ruled
-  // lines behind it can be drawn at the same pitch instead of a guess.
-  FontMetrics {
-    id: bodyMetrics
-    font.family: root.fontFamily
-    font.pixelSize: root.sectionFontSize
   }
 
   Timer {
@@ -852,7 +859,27 @@ Panel {
             required property int index
 
             // Handle for focusSection() above.
-            readonly property var field: sectionField
+            // Enough slots to rule the box out, plus room to keep typing.
+            // `grown` only ever goes up, so pressing Return on the last line
+            // adds one rather than swallowing the keystroke.
+            property int grown: 0
+            readonly property int storedCount: {
+              root.revision
+              return root.sectionLines(root.headMonthKey, box.modelData.id).length
+            }
+            readonly property int lineSlots: Math.max(
+              Math.floor(writingArea.height / root.rowHeight),
+              box.storedCount + 1,
+              box.grown)
+
+            function focusLine(index) {
+              if (index < 0) return
+              if (index >= box.lineSlots) box.grown = index + 1
+              Qt.callLater(function() {
+                var row = lineList.itemAtIndex(index)
+                if (row && row.field) row.field.forceActiveFocus()
+              })
+            }
 
             x: box.modelData.col === 0 ? 0 : rightPage.colWidth + rightPage.colGap
             y: box.modelData.row === 0 ? 0 : rightPage.topHeight + rightPage.rowGap
@@ -887,53 +914,86 @@ Panel {
               anchors.bottom: parent.bottom
               clip: true
 
-              Repeater {
-                model: Math.max(0, Math.floor(writingArea.height / root.sectionLineHeight))
-
-                Rectangle {
-                  required property int index
-                  y: (index + 1) * root.sectionLineHeight - 1
-                  width: writingArea.width
-                  height: 1
-                  color: root.ruleColor
-                }
-              }
-
-              TextEdit {
-                id: sectionField
+              // One single-line field per rule, built exactly the way the day
+              // page is. A single multi-line TextEdit can never sit on rules at
+              // the day page's pitch -- Qt gives TextEdit no line-height
+              // control at all -- but a column of one-line fields can, and it
+              // gets the same Enter-moves-down behaviour for free.
+              ListView {
+                id: lineList
                 anchors.fill: parent
-                wrapMode: TextEdit.Wrap
-                color: root.fg
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                selectByMouse: true
-                selectionColor: Style.selectionFill
-                selectedTextColor: root.fg
-                property bool syncing: false
-                property string monthNow: root.headMonthKey
-                property int rev: root.revision
+                clip: true
+                model: box.lineSlots
+                interactive: contentHeight > height
+                boundsBehavior: Flickable.StopAtBounds
+                reuseItems: false
 
-                function reload() {
-                  sectionField.syncing = true
-                  sectionField.text = root.sectionFor(root.headMonthKey, box.modelData.id)
-                  sectionField.syncing = false
-                }
+                delegate: Item {
+                  id: lineRow
+                  required property int index
 
-                onMonthNowChanged: sectionField.reload()
-                onRevChanged: sectionField.reload()
-                Component.onCompleted: sectionField.reload()
+                  width: lineList.width
+                  height: root.rowHeight
 
-                onTextChanged: if (!sectionField.syncing)
-                  root.setSection(root.headMonthKey, box.modelData.id, sectionField.text)
-                onActiveFocusChanged: if (sectionField.activeFocus) {
-                  root.editingSection = true
-                  root.editing = false
-                }
+                  readonly property var field: lineField
 
-                Keys.onPressed: function(event) {
-                  if (event.key === Qt.Key_Escape) {
-                    root.stopSectionEditing()
-                    event.accepted = true
+                  TextInput {
+                    id: lineField
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.rightMargin: Style.space(6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    clip: true
+                    color: root.fg
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    selectByMouse: true
+                    selectionColor: Style.selectionFill
+                    selectedTextColor: root.fg
+
+                    property bool syncing: false
+                    property string monthNow: root.headMonthKey
+                    property int rev: root.revision
+
+                    function reload() {
+                      lineField.syncing = true
+                      lineField.text = root.sectionLineAt(root.headMonthKey,
+                                                          box.modelData.id, lineRow.index)
+                      lineField.syncing = false
+                    }
+
+                    onMonthNowChanged: lineField.reload()
+                    onRevChanged: lineField.reload()
+                    Component.onCompleted: lineField.reload()
+
+                    onTextChanged: if (!lineField.syncing)
+                      root.setSectionLine(root.headMonthKey, box.modelData.id,
+                                          lineRow.index, lineField.text)
+                    onActiveFocusChanged: if (lineField.activeFocus) {
+                      root.editingSection = true
+                      root.editing = false
+                    }
+
+                    Keys.onPressed: function(event) {
+                      if (event.key === Qt.Key_Escape) {
+                        root.stopSectionEditing()
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                 || event.key === Qt.Key_Down) {
+                        box.focusLine(lineRow.index + 1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Up) {
+                        box.focusLine(lineRow.index - 1)
+                        event.accepted = true
+                      }
+                    }
+                  }
+
+                  Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: root.ruleColor
                   }
                 }
               }
