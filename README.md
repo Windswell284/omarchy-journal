@@ -1,9 +1,9 @@
-# Monthly Log
+# Monthly Calendar
 
-A bullet journal monthly log for the [Omarchy](https://omarchy.org) shell bar.
+A bullet journal monthly calendar for the [Omarchy](https://omarchy.org) shell bar.
 
 One ruled line per day, labelled with the date and its weekday initial, with a
-heavier rule closing every week — the paper monthly log, typed into rather than
+heavier rule closing every week — the paper original, typed into rather than
 written on. The days run continuously, so the end of one month flows straight
 into the next instead of stopping at a page break.
 
@@ -85,7 +85,7 @@ slightly dimmed for any other.
 To summon it from the keyboard, add this to `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + M", "Monthly log", "omarchy-shell shell toggle pyang.journal")
+o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
 ```
 
 `omarchy plugin add` places the widget in the bar but does not create this

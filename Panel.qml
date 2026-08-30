@@ -7,7 +7,7 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// A bullet journal monthly log in the bar.
+// A bullet journal monthly calendar in the bar.
 //
 // The paper original is a month name over one ruled line per day, each line
 // labelled with the date and the initial of its weekday, and a heavier rule

@@ -1,6 +1,6 @@
 .pragma library
 
-// Date math and Markdown (de)serialization for the monthly log.
+// Date math and Markdown (de)serialization for the monthly calendar.
 //
 // The log scrolls as one continuous run of days, so days are addressed
 // globally by date key ("2026-08-30") and only grouped back into months at

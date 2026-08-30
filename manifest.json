@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "pyang.journal",
-  "name": "Monthly Log",
+  "name": "Monthly Calendar",
   "version": "1.0.0",
   "author": "pyang",
-  "description": "Bullet journal monthly log, stored as Markdown in the Obsidian vault",
+  "description": "Bullet journal monthly calendar, stored as Markdown in the Obsidian vault",
   "kinds": [
     "bar-widget"
   ],
@@ -12,8 +12,8 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Monthly Log",
-    "description": "Bullet journal monthly log, stored as Markdown in the Obsidian vault",
+    "displayName": "Monthly Calendar",
+    "description": "Bullet journal monthly calendar, stored as Markdown in the Obsidian vault",
     "category": "Time",
     "allowMultiple": false
   }
