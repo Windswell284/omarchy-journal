@@ -71,6 +71,8 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `t` | Jump back to today |
 | `[` / `]` | Previous / next month |
 | `{` / `}` | Previous / next year |
+| `s` | Open or close the facing page |
+| `1` `2` `3` `4` | Jump into a facing-page box (opens it first if shut) |
 | `Tab` | Switch to the neighbouring bar panel |
 
 The wheel scrolls the days continuously. Clicking the month name returns to
@@ -88,8 +90,40 @@ To summon it from the keyboard, add this to `~/.config/hypr/bindings.lua`:
 o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
 ```
 
-`omarchy plugin add` places the widget in the bar but does not create this
-binding, so it has to be added by hand.
+To summon it straight onto the facing page:
+
+```lua
+o.bind("SUPER + SHIFT + M", "Monthly calendar spread", "omarchy-shell pyang.journal spread")
+```
+
+`omarchy plugin add` places the widget in the bar but does not create these
+bindings, so they have to be added by hand.
+
+## The facing page
+
+A monthly spread is two pages. The right one holds four boxes for the month as
+a whole -- Goals / Focus and Tasks on the taller top row, Grateful and Next
+Month beneath. It stays shut until asked for, so the default is exactly the day
+log. The boxes follow whichever month the heading names.
+
+They are stored in the same monthly note, under `## ` headings after the days:
+
+```markdown
+## Goals / Focus
+
+ship v2
+
+## Tasks
+
+- 3 emails to send
+```
+
+Note that a bullet like `- 3 emails to send` sits under a heading and is *not*
+read back as the 3rd of the month: the note is split at its first `## ` heading
+and days are only parsed above it.
+
+IPC methods, for binding to keys: `open`, `close`, `toggle`, `spread`,
+`toggleSpread` -- e.g. `omarchy-shell pyang.journal spread`.
 
 ## Hacking on it
 

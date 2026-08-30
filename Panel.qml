@@ -24,6 +24,9 @@ Panel {
   id: root
   moduleName: "pyang.journal"
   ipcTarget: "pyang.journal"
+  // Taking the handler over from Ui/Panel: only one may own a target, and the
+  // base one has no way to open straight onto the facing page.
+  manageIpc: false
 
   // ---- Where the notes live. Overridable per-entry in shell.json so the
   //      vault can move without touching this file.
@@ -122,6 +125,11 @@ Panel {
   readonly property int gutterWidth: Style.space(15)
   readonly property int letterWidth: Style.space(12)
   readonly property int spineGap: Style.space(14)
+  // TextEdit exposes no line-height control of any kind (lineCount and
+  // contentHeight are all it has), so the only way to open the ruling up while
+  // keeping typed text landing ON the rules is to give the facing page its own
+  // slightly larger type and let the metrics carry the pitch with it.
+  readonly property int sectionFontSize: Math.round(Style.font.body * 1.25)
   readonly property int sectionLineHeight: Math.round(bodyMetrics.height)
 
   // The card pads its own edges, and the heading and footer each centre inside
@@ -292,6 +300,13 @@ Panel {
     })
   }
 
+  // Summon straight onto the facing page. open() shuts it by default, so the
+  // order matters here.
+  function openSpread() {
+    if (!root.opened) root.open()
+    root.spreadOpen = true
+  }
+
   function toggleSpread() {
     root.spreadOpen = !root.spreadOpen
     if (!root.spreadOpen) stopSectionEditing()
@@ -349,12 +364,24 @@ Panel {
 
   Component.onDestruction: root.flush()
 
+  IpcHandler {
+    target: "pyang.journal"
+
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
+    function spread(): void { root.openSpread() }
+    function toggleSpread(): void { root.toggleSpread() }
+  }
+
   // The line spacing TextEdit will actually lay text out on, so the ruled
   // lines behind it can be drawn at the same pitch instead of a guess.
   FontMetrics {
     id: bodyMetrics
     font.family: root.fontFamily
-    font.pixelSize: Style.font.body
+    font.pixelSize: root.sectionFontSize
   }
 
   Timer {
