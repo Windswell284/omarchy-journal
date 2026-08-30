@@ -86,6 +86,27 @@ Panel {
   // one would mean racing its pending write.
   property var loadedKeys: []
 
+  // ---- The facing page. A real monthly spread is two pages: the day log on
+  //      the left, and boxes for the month's thinking on the right. It stays
+  //      shut until asked for, so the default is exactly the log it was.
+  property bool spreadOpen: false
+  property bool editingSection: false
+
+  // Section prose, keyed "2026-08|goals". Same deal as `entries`: read by the
+  // fields once per revision, never bound into them.
+  property var sectionText: ({})
+
+  readonly property string headMonthKey: Model.monthKey(headYear, headMonth)
+
+  // Goals and Tasks carry the month's thinking and take the taller row;
+  // Grateful and Next Month are shorter by nature and sit under them.
+  readonly property var sectionLayout: [
+    { id: "goals",    title: "Goals / Focus", col: 0, row: 0 },
+    { id: "tasks",    title: "Tasks",         col: 1, row: 0 },
+    { id: "grateful", title: "Grateful",      col: 0, row: 1 },
+    { id: "next",     title: "Next Month",    col: 1, row: 1 }
+  ]
+
   // ---- Cursor. `cursorIndex` indexes `days`; `editing` is whether that row
   //      currently owns the keyboard.
   property int cursorIndex: 0
@@ -100,6 +121,8 @@ Panel {
   readonly property int footerHeight: Style.space(20)
   readonly property int gutterWidth: Style.space(15)
   readonly property int letterWidth: Style.space(12)
+  readonly property int spineGap: Style.space(14)
+  readonly property int sectionLineHeight: Math.round(bodyMetrics.height)
 
   // The card pads its own edges, and the heading and footer each centre inside
   // their own band, so both drift toward the middle of the panel: the month
@@ -130,6 +153,32 @@ Panel {
     return value === undefined || value === null ? "" : String(value)
   }
 
+  function sectionSlot(monthKey, id) {
+    return monthKey + "|" + id
+  }
+
+  function sectionFor(monthKey, id) {
+    var value = root.sectionText[sectionSlot(monthKey, id)]
+    return value === undefined || value === null ? "" : String(value)
+  }
+
+  function setSection(monthKey, id, text) {
+    if (root.loading) return
+    if (sectionFor(monthKey, id) === text) return
+    root.sectionText[sectionSlot(monthKey, id)] = text
+    root.dirtyMonths[monthKey] = true
+    saveTimer.restart()
+  }
+
+  function sectionsOf(monthKey) {
+    var out = ({})
+    for (var i = 0; i < Model.SECTIONS.length; i++) {
+      var id = Model.SECTIONS[i].id
+      out[id] = sectionFor(monthKey, id)
+    }
+    return out
+  }
+
   function setEntry(dateKey, monthKey, text) {
     if (root.loading) return
     if (contentFor(dateKey) === text) return
@@ -145,7 +194,13 @@ Panel {
     // would reset every field in that month mid-sentence.
     if (text !== null && String(text) === String(root.written[key] || " ")) return
     root.loading = true
-    Model.applyMonth(root.entries, key, text === null ? ({}) : Model.parseMonth(text))
+    var parsed = text === null ? { days: ({}), sections: ({}) } : Model.parseNote(text)
+    Model.applyMonth(root.entries, key, parsed.days)
+    for (var i = 0; i < Model.SECTIONS.length; i++) {
+      var id = Model.SECTIONS[i].id
+      var body = parsed.sections[id]
+      root.sectionText[sectionSlot(key, id)] = body === undefined ? "" : body
+    }
     root.existingMonths[key] = text !== null
     root.loading = false
     root.revision += 1
@@ -170,8 +225,9 @@ Panel {
     // Browsing through a month must not litter the vault with empty notes;
     // only write once there is something to write, or a note already exists
     // (so clearing the last entry still saves).
-    if (!root.existingMonths[key] && !Model.monthHasContent(year, month, root.entries)) return
-    var out = Model.serializeMonth(year, month, root.entries)
+    var sections = sectionsOf(key)
+    if (!root.existingMonths[key] && !Model.monthHasContent(year, month, root.entries, sections)) return
+    var out = Model.serializeMonth(year, month, root.entries, sections)
     root.written[key] = out
     file.setText(out)
     root.existingMonths[key] = true
@@ -225,6 +281,27 @@ Panel {
     goToIndex(next, edit)
   }
 
+  // Reach the boxes from the keyboard: 1-4 read across the grid the way it
+  // looks, opening the facing page first if it is shut.
+  function focusSection(index) {
+    if (index < 0 || index >= root.sectionLayout.length) return
+    root.spreadOpen = true
+    Qt.callLater(function() {
+      var box = sectionBoxes.itemAt(index)
+      if (box && box.field) box.field.forceActiveFocus()
+    })
+  }
+
+  function toggleSpread() {
+    root.spreadOpen = !root.spreadOpen
+    if (!root.spreadOpen) stopSectionEditing()
+  }
+
+  function stopSectionEditing() {
+    root.editingSection = false
+    keyCatcher.forceActiveFocus()
+  }
+
   function stopEditing() {
     root.editing = false
     keyCatcher.forceActiveFocus()
@@ -238,6 +315,10 @@ Panel {
   // -------------------------------------------------------------- lifecycle
 
   function open() {
+    // Shut by default every time: the log is the thing, the facing page is
+    // something you go and get.
+    root.spreadOpen = false
+    root.editingSection = false
     root.controller.show()
     // Deferred so the list has been laid out and has somewhere to scroll to.
     Qt.callLater(function() {
@@ -260,12 +341,21 @@ Panel {
   onOpenedChanged: if (!root.opened) {
     root.flush()
     root.editing = false
+    root.editingSection = false
   }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   Component.onDestruction: root.flush()
+
+  // The line spacing TextEdit will actually lay text out on, so the ruled
+  // lines behind it can be drawn at the same pitch instead of a guess.
+  FontMetrics {
+    id: bodyMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.body
+  }
 
   Timer {
     id: saveTimer
@@ -375,7 +465,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(520))
+    contentWidth: panel.fittedContentWidth(root.spreadOpen ? Style.space(1040) : Style.space(520))
     contentHeight: panel.fittedContentHeight(
       root.headerHeight + 31 * root.rowHeight + root.footerHeight + Style.space(10),
       Style.space(860))
@@ -383,9 +473,15 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+
+      // How wide one page is. Shut, the log has the whole card; open, the two
+      // pages split it either side of the spine.
+      readonly property int pageWidth: root.spreadOpen
+        ? Math.floor((width - root.spineGap * 2) / 2)
+        : width
       // While a row owns the keyboard every key belongs to it -- including the
       // h/l/j/k that would otherwise be swallowed as navigation.
-      blocked: root.editing
+      blocked: root.editing || root.editingSection
 
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
@@ -400,6 +496,8 @@ Panel {
         else if (t === "{") root.moveMonth(-12)
         else if (t === "}") root.moveMonth(12)
         else if (t === "t" || t === "T") root.goToToday()
+        else if (t === "s" || t === "S") root.toggleSpread()
+        else if (t >= "1" && t <= "4") root.focusSection(parseInt(t, 10) - 1)
       }
 
       // ---- Heading: the month at the top of the view, with the two chevrons
@@ -409,7 +507,7 @@ Panel {
         id: header
         anchors.top: parent.top
         anchors.left: parent.left
-        anchors.right: parent.right
+        width: keyCatcher.pageWidth
         height: root.headerHeight
 
         Row {
@@ -473,6 +571,31 @@ Panel {
           }
         }
 
+        // Opens the facing page. Sits at the outer edge of the log, where a
+        // thumb would go to turn the page.
+        Text {
+          id: spreadToggle
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: -root.headerBias
+          text: root.spreadOpen ? "󰄽" : "󰄾"
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.icon
+          color: spreadMouse.containsMouse
+            ? Style.hoverStateColor(root.fg, Color.accent)
+            : root.mutedColor
+
+          MouseArea {
+            id: spreadMouse
+            anchors.fill: parent
+            anchors.margins: -Style.space(6)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleSpread()
+          }
+        }
+
         // The rule under the heading is the one the days hang from.
         Rectangle {
           anchors.bottom: parent.bottom
@@ -490,7 +613,7 @@ Panel {
         anchors.top: header.bottom
         anchors.topMargin: Style.space(4)
         anchors.left: parent.left
-        anchors.right: parent.right
+        width: keyCatcher.pageWidth
         anchors.bottom: footer.top
         anchors.bottomMargin: Style.space(4)
         clip: true
@@ -624,6 +747,7 @@ Panel {
               onActiveFocusChanged: if (activeFocus) {
                 root.cursorIndex = dayRow.index
                 root.editing = true
+                root.editingSection = false
               }
 
               Keys.onPressed: function(event) {
@@ -659,6 +783,138 @@ Panel {
         }
       }
 
+      // ---- The spine. Two pages of one notebook, not two panels.
+      Rectangle {
+        id: spine
+        visible: root.spreadOpen
+        anchors.left: parent.left
+        anchors.leftMargin: keyCatcher.pageWidth + root.spineGap
+        anchors.top: parent.top
+        anchors.bottom: footer.top
+        width: Math.max(1, Style.space(1))
+        color: root.ruleColor
+      }
+
+      // ---- The facing page: four boxes for the month as a whole, against the
+      //      left page's day-by-day. Ruled at the same pitch the text sits on,
+      //      so writing lands on the lines rather than near them.
+      Item {
+        id: rightPage
+        visible: root.spreadOpen
+        anchors.left: spine.right
+        anchors.leftMargin: root.spineGap
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: root.headerHeight - Style.space(18)
+        anchors.bottom: footer.top
+        anchors.bottomMargin: Style.space(4)
+
+        readonly property int colGap: Style.space(14)
+        readonly property int rowGap: Style.space(16)
+        readonly property int colWidth: Math.floor((width - colGap) / 2)
+        readonly property int topHeight: Math.round((height - rowGap) * 0.58)
+        readonly property int bottomHeight: height - rowGap - topHeight
+
+        Repeater {
+          id: sectionBoxes
+          model: root.sectionLayout
+
+          delegate: Item {
+            id: box
+            required property var modelData
+            required property int index
+
+            // Handle for focusSection() above.
+            readonly property var field: sectionField
+
+            x: box.modelData.col === 0 ? 0 : rightPage.colWidth + rightPage.colGap
+            y: box.modelData.row === 0 ? 0 : rightPage.topHeight + rightPage.rowGap
+            width: rightPage.colWidth
+            height: box.modelData.row === 0 ? rightPage.topHeight : rightPage.bottomHeight
+
+            Text {
+              id: boxTitle
+              anchors.top: parent.top
+              anchors.left: parent.left
+              text: box.modelData.title.toUpperCase()
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.letterSpacing: Style.space(1)
+              color: root.mutedColor
+            }
+
+            Rectangle {
+              id: boxRule
+              anchors.top: boxTitle.bottom
+              anchors.topMargin: Style.space(5)
+              width: parent.width
+              height: Math.max(1, Style.space(1))
+              color: root.weekRuleColor
+            }
+
+            Item {
+              id: writingArea
+              anchors.top: boxRule.bottom
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              clip: true
+
+              Repeater {
+                model: Math.max(0, Math.floor(writingArea.height / root.sectionLineHeight))
+
+                Rectangle {
+                  required property int index
+                  y: (index + 1) * root.sectionLineHeight - 1
+                  width: writingArea.width
+                  height: 1
+                  color: root.ruleColor
+                }
+              }
+
+              TextEdit {
+                id: sectionField
+                anchors.fill: parent
+                wrapMode: TextEdit.Wrap
+                color: root.fg
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                selectByMouse: true
+                selectionColor: Style.selectionFill
+                selectedTextColor: root.fg
+                property bool syncing: false
+                property string monthNow: root.headMonthKey
+                property int rev: root.revision
+
+                function reload() {
+                  sectionField.syncing = true
+                  sectionField.text = root.sectionFor(root.headMonthKey, box.modelData.id)
+                  sectionField.syncing = false
+                }
+
+                onMonthNowChanged: sectionField.reload()
+                onRevChanged: sectionField.reload()
+                Component.onCompleted: sectionField.reload()
+
+                onTextChanged: if (!sectionField.syncing)
+                  root.setSection(root.headMonthKey, box.modelData.id, sectionField.text)
+                onActiveFocusChanged: if (sectionField.activeFocus) {
+                  root.editingSection = true
+                  root.editing = false
+                }
+
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    root.stopSectionEditing()
+                    event.accepted = true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // ---- Where it all ends up, so the Obsidian side is never a mystery.
       Item {
         id: footer
@@ -684,7 +940,8 @@ Panel {
           anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
-          text: root.editing ? "esc  done" : "←→  month     ↵  write     t  today"
+          text: (root.editing || root.editingSection) ? "esc  done"
+            : root.spreadOpen ? "1-4  boxes     s  close     t  today" : "←→  month     ↵  write     s  facing page     t  today"
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.mutedColor

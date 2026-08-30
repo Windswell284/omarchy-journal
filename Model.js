@@ -23,6 +23,17 @@ var MONTHS = ["January", "February", "March", "April", "May", "June",
 // beside it already disambiguates.
 var DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]
 
+// The facing page. Ids are internal; titles are what land in the note as "## "
+// headings and what the panel labels each box with.
+var SECTIONS = [
+  { id: "goals",    title: "Goals / Focus" },
+  { id: "tasks",    title: "Tasks" },
+  { id: "grateful", title: "Grateful" },
+  { id: "next",     title: "Next Month" }
+]
+
+var SECTION_RE = /^##\s+(.+?)\s*$/
+
 function pad2(n) {
   return n < 10 ? "0" + n : String(n)
 }
@@ -106,7 +117,7 @@ function indexOfMonth(days, year, month) {
   return -1
 }
 
-function serializeMonth(year, month, entries) {
+function serializeMonth(year, month, entries, sections) {
   var lines = ["# " + monthTitle(year, month), ""]
   var total = daysInMonth(year, month)
   for (var day = 1; day <= total; day++) {
@@ -114,6 +125,16 @@ function serializeMonth(year, month, entries) {
     var value = entries[dateKey(year, month, day)]
     var body = value === undefined || value === null ? "" : String(value)
     lines.push("- **" + day + " " + DAY_LETTERS[dow] + "**" + (body ? " " + body : ""))
+  }
+  // Every heading is written whether or not it has anything under it, for the
+  // same reason every day is: the note is a form to fill in, and a missing
+  // heading is a worse thing to hand someone than an empty one.
+  for (var i = 0; i < SECTIONS.length; i++) {
+    var text = sections && sections[SECTIONS[i].id] ? String(sections[SECTIONS[i].id]) : ""
+    lines.push("")
+    lines.push("## " + SECTIONS[i].title)
+    lines.push("")
+    if (text) lines.push(text)
   }
   return lines.join("\n") + "\n"
 }
@@ -123,6 +144,67 @@ function serializeMonth(year, month, entries) {
 // the right day. Bullets that don't start with a day number (a stray note, a
 // nested list) are left alone rather than being forced onto a day.
 var LINE_RE = /^\s*[-*]\s*(?:\*\*)?\s*(\d{1,2})\s*[A-Za-z]?\s*(?:\*\*)?\s*(.*?)\s*$/
+
+// A note is the day log first, then the facing-page sections under "## "
+// headings. Splitting on the first heading matters more than it looks: the day
+// regex below happily reads "- 3 emails to send" under Tasks as the 3rd, so
+// section prose has to be cut away before days are parsed at all.
+function splitNote(text) {
+  var lines = String(text || "").split("\n")
+  var days = []
+  var sections = []
+  var inSections = false
+  for (var i = 0; i < lines.length; i++) {
+    if (!inSections && SECTION_RE.test(lines[i])) inSections = true
+    if (inSections) sections.push(lines[i])
+    else days.push(lines[i])
+  }
+  return { days: days.join("\n"), sections: sections.join("\n") }
+}
+
+// Tolerant of spacing and slashes, so "## Goals/Focus" typed by hand in
+// Obsidian still matches the "Goals / Focus" we write.
+function sectionIdForTitle(title) {
+  var want = String(title).toLowerCase().replace(/[\s\/]+/g, "")
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].title.toLowerCase().replace(/[\s\/]+/g, "") === want) return SECTIONS[i].id
+  }
+  return ""
+}
+
+function parseSections(text) {
+  var out = {}
+  if (!text) return out
+  var lines = String(text).split("\n")
+  var current = ""
+  var buffer = []
+  for (var i = 0; i < lines.length; i++) {
+    var heading = SECTION_RE.exec(lines[i])
+    if (heading) {
+      if (current) out[current] = trimBlank(buffer)
+      buffer = []
+      current = sectionIdForTitle(heading[1])
+    } else if (current) {
+      buffer.push(lines[i])
+    }
+  }
+  if (current) out[current] = trimBlank(buffer)
+  return out
+}
+
+// Drop the blank lines a heading is padded with, keep any inside the body.
+function trimBlank(lines) {
+  var start = 0
+  var end = lines.length
+  while (start < end && lines[start].replace(/\s/g, "") === "") start++
+  while (end > start && lines[end - 1].replace(/\s/g, "") === "") end--
+  return lines.slice(start, end).join("\n")
+}
+
+function parseNote(text) {
+  var split = splitNote(text)
+  return { days: parseMonth(split.days), sections: parseSections(split.sections) }
+}
 
 function parseMonth(text) {
   var byDay = {}
@@ -153,11 +235,15 @@ function applyMonth(entries, key, byDay) {
   }
 }
 
-function monthHasContent(year, month, entries) {
+function monthHasContent(year, month, entries, sections) {
   var total = daysInMonth(year, month)
   for (var day = 1; day <= total; day++) {
     var value = entries[dateKey(year, month, day)]
     if (value && String(value).length > 0) return true
+  }
+  for (var i = 0; i < SECTIONS.length; i++) {
+    var text = sections ? sections[SECTIONS[i].id] : ""
+    if (text && String(text).length > 0) return true
   }
   return false
 }
