@@ -454,38 +454,79 @@ Panel {
         Shape {
           id: bullet
           anchors.centerIn: parent
-          // 10% wider than tall-for-tall proportion, which reads better in
-          // the bar than the narrower round did. Symmetry does not depend on
-          // the width here -- the single centre-line control point below is
-          // what guarantees it -- so this is free to be any integer.
-          width: Math.round(2 * Math.round(parent.width * 0.15) * 1.1)
+          // The reference cartridge is 0.3265 wide for its height. Held to
+          // that it comes out 9px in the bar, which reads thin beside the
+          // neighbouring icons, so the width stays where it was tuned and the
+          // round is a little stouter than the photo. Every other proportion
+          // -- nose, cannelure, case, rim -- is the reference's own.
           height: 2 * Math.round(parent.height * 0.36)
+          width: Math.round(2 * Math.round(parent.width * 0.15) * 1.1)
           antialiasing: true
 
           ShapePath {
-            id: outline
             fillColor: button.foreground
             strokeWidth: 0
             strokeColor: "transparent"
+            PathSvg { path: bullet.outline }
+          }
 
-            readonly property real w: bullet.width
-            readonly property real h: bullet.height
-            readonly property real nose: bullet.height * 0.42
+          // Half-widths sampled down the reference nose, as a fraction of the
+          // case's half-width, against height fraction. Traced rather than
+          // invented: a parabola or a plain dome both come out too pointed,
+          // because a real ogive flattens off well before its shoulder.
+          readonly property var nose: [
+            [0.000, 0.011], [0.027, 0.289], [0.055, 0.454], [0.082, 0.570],
+            [0.110, 0.665], [0.137, 0.735], [0.164, 0.793], [0.192, 0.839],
+            [0.219, 0.878], [0.246, 0.906], [0.274, 0.924], [0.301, 0.939],
+            [0.329, 0.941], [0.356, 0.944], [0.366, 0.944]
+          ]
 
-            startX: 0
-            startY: outline.nose
+          // Three separate pieces, as the reference has: the round, the case
+          // below a cannelure gap, and the rim bar below another. Both gaps
+          // are forced to a whole pixel -- at bar size they measure about half
+          // a pixel and would otherwise vanish, welding the parts together.
+          readonly property string outline: {
+            var w = bullet.width
+            var h = bullet.height
+            var half = w / 2
+            // Kept fractional on purpose. These are logical units and the
+            // widget is only ten of them tall, so rounding the two gaps and
+            // the rim up to a whole unit each spent a third of the height on
+            // them and left the case at half its share. The display renders at
+            // 2x, so half a unit is a real device pixel -- that is the floor,
+            // and everything else keeps the reference's exact proportions.
+            var gap = Math.max(0.5, h * 0.016)
+            var rimHeight = Math.max(0.5, h * 0.035)
+            var noseFoot = h * 0.366
+            var caseTop = noseFoot + gap
+            var rimTop = h - rimHeight
+            var caseFoot = rimTop - gap
+            var caseWaist = caseFoot - (caseFoot - caseTop) * 0.09
+            var p = bullet.nose
+            var d = []
 
-            // One quadratic with its control point on the centre line, so the
-            // nose is symmetric by construction rather than by two curves
-            // agreeing. Control at -nose puts the apex exactly on y = 0.
-            PathQuad {
-              controlX: outline.w / 2
-              controlY: -outline.nose
-              x: outline.w
-              y: outline.nose
-            }
-            PathLine { x: outline.w; y: outline.h }
-            PathLine { x: 0;         y: outline.h }
+            // up the left flank, over the tip, back down the right
+            d.push("M " + (half - p[p.length - 1][1] * half) + " " + noseFoot)
+            for (var i = p.length - 1; i >= 0; i--)
+              d.push("L " + (half - p[i][1] * half) + " " + (p[i][0] * h))
+            for (var j = 0; j < p.length; j++)
+              d.push("L " + (half + p[j][1] * half) + " " + (p[j][0] * h))
+            d.push("Z")
+
+            // the case, tucking in slightly at its foot
+            d.push("M 0 " + caseTop + " L " + w + " " + caseTop
+                 + " L " + w + " " + caseWaist
+                 + " L " + (half + 0.78 * half) + " " + caseFoot
+                 + " L " + (half - 0.78 * half) + " " + caseFoot
+                 + " L 0 " + caseWaist + " Z")
+
+            // the rim
+            d.push("M " + (half - 0.98 * half) + " " + rimTop
+                 + " L " + (half + 0.98 * half) + " " + rimTop
+                 + " L " + (half + 0.98 * half) + " " + h
+                 + " L " + (half - 0.98 * half) + " " + h + " Z")
+
+            return d.join(" ")
           }
         }
       }
@@ -892,9 +933,9 @@ Panel {
               anchors.left: parent.left
               text: box.modelData.title.toUpperCase()
               font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.bodySmall
               font.letterSpacing: Style.space(1)
-              color: root.mutedColor
+              color: root.fg
             }
 
             Rectangle {

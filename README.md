@@ -136,6 +136,12 @@ One thing that will waste your afternoon otherwise: **run
 `Local plugin changed, reloading` but does not rebuild an already-running
 widget, so your change appears not to have taken effect.
 
+## The bar icon
+
+Drawn, not from a font: no single-cartridge glyph exists in the Nerd Font set.
+The outline is traced from a reference photo -- nose profile, cannelure,
+case and rim are sampled proportions rather than invented ones.
+
 ## Requires
 
 Omarchy 3.x with the Quickshell-based `omarchy-shell`. Draws its bar icon with
