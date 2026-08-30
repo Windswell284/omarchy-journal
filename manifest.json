@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "pyang.journal",
+  "name": "Monthly Log",
+  "version": "1.0.0",
+  "author": "pyang",
+  "description": "Bullet journal monthly log, stored as Markdown in the Obsidian vault",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Monthly Log",
+    "description": "Bullet journal monthly log, stored as Markdown in the Obsidian vault",
+    "category": "Time",
+    "allowMultiple": false
+  }
+}
