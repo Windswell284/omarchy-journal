@@ -74,6 +74,7 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `s` | Open or close the facing page |
 | `1` `2` `3` `4` | Jump into a facing-page box (opens it first if shut) |
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
+| `p` | Print the month on screen as a cut-out spread |
 | `Tab` | Switch to the neighbouring bar panel |
 
 The wheel scrolls the days continuously. Clicking the month name returns to
@@ -135,6 +136,25 @@ One thing that will waste your afternoon otherwise: **run
 `omarchy restart shell` after editing the QML.** Saving logs
 `Local plugin changed, reloading` but does not rebuild an already-running
 widget, so your change appears not to have taken effect.
+
+## Printing
+
+`print-month` renders a month as a spread meant to be cut out and pasted into
+a notebook: two 5.25 x 7.25in pages side by side on one 11 x 8.5in landscape
+sheet, with hairline cut guides and both pages ruled at the same pitch.
+
+```bash
+./print-month                 # this month, into ~/Downloads
+./print-month 2026-08         # a given month
+./print-month 2026-08 --blank # the ruling only, nothing filled in
+./print-month -o spread.pdf   # somewhere else
+```
+
+It reads the same note the panel writes and honours the same `vault`/`folder`
+override, so a printed month carries whatever is already in it. `--blank` gives
+you the template to fill in by hand. Rendering needs `chromium` or
+`google-chrome` on PATH. Pressing `p` in the panel prints the month on screen
+and notifies you where it landed.
 
 ## The bar icon
 

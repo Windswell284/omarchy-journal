@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Render a month's log as a cut-out spread.
+
+Two 5.25 x 7.25in pages side by side on one 11 x 8.5in landscape sheet, with
+hairline cut guides. Reads the same Markdown note the bar plugin writes, so a
+printed month carries whatever is already in it.
+
+  print-month                 the current month
+  print-month 2026-08         a given month
+  print-month 2026-08 --blank the ruling only, nothing filled in
+"""
+
+import argparse, calendar, datetime, html, os, re, shutil, subprocess, sys, tempfile
+
+DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]          # Sunday-indexed
+SECTIONS = [("Goals / Focus", 0, 0), ("Tasks", 1, 0),
+            ("Grateful", 0, 1), ("Next Month", 1, 1)]
+SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
+
+# Page geometry, in inches. The CSS is generated from these so the ruling and
+# the number of ruled lines cannot drift apart.
+PITCH = .1935          # one ruled line, the same on both pages
+GRID_H = 6.62          # the facing page's four boxes together
+R0_H, R1_H = GRID_H * .56, GRID_H * .40
+R0_TITLE, R1_TITLE = .253, .167
+RULE_H, RULE_GAP = .010, .05
+R0_LINES = int((R0_H - R0_TITLE - RULE_H - RULE_GAP) / PITCH)
+R1_LINES = int((R1_H - R1_TITLE - RULE_H - RULE_GAP) / PITCH)
+LINE_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?\s*(\d{1,2})\s*[A-Za-z]?\s*(?:\*\*)?\s*(.*?)\s*$")
+
+
+def vault_dir():
+    """Honour a vault/folder override in shell.json, else the default."""
+    home = os.path.expanduser("~")
+    vault, folder = home + "/Documents/Obsidian", "Monthly Calendar"
+    try:
+        import json
+        cfg = json.load(open(home + "/.config/omarchy/shell.json"))
+        for section in cfg.get("bar", {}).get("layout", {}).values():
+            for entry in section:
+                if entry.get("id") == "pyang.journal":
+                    vault = entry.get("vault", vault)
+                    folder = entry.get("folder", folder)
+    except Exception:
+        pass
+    return os.path.join(vault, folder)
+
+
+def parse(path):
+    """Split the note at its first '## ' heading: days above, sections below."""
+    days, sections = {}, {}
+    if not os.path.exists(path):
+        return days, sections
+    text = open(path, encoding="utf-8").read()
+    current, buffer, in_sections = None, [], False
+    for line in text.split("\n"):
+        heading = SECTION_RE.match(line)
+        if heading:
+            if current:
+                sections[current] = "\n".join(buffer).strip("\n")
+            current, buffer, in_sections = heading.group(1).strip(), [], True
+            continue
+        if in_sections:
+            buffer.append(line)
+        elif not line.startswith("#"):
+            match = LINE_RE.match(line)
+            if match and 1 <= int(match.group(1)) <= 31:
+                days[int(match.group(1))] = match.group(2)
+    if current:
+        sections[current] = "\n".join(buffer).strip("\n")
+    return days, sections
+
+
+def section_body(sections, title):
+    """Match headings loosely, the way the plugin does."""
+    want = re.sub(r"[\s/]+", "", title).lower()
+    for key, body in sections.items():
+        if re.sub(r"[\s/]+", "", key).lower() == want:
+            return body
+    return ""
+
+
+def build_html(year, month, days, sections, blank):
+    total = calendar.monthrange(year, month)[1]
+    title = "%s %d" % (calendar.month_name[month], year)
+
+    rows = []
+    for day in range(1, total + 1):
+        dow = (datetime.date(year, month, day).weekday() + 1) % 7
+        entry = "" if blank else html.escape(days.get(day, ""))
+        rows.append(
+            '<div class="row{heavy}"><span class="num">{d}</span>'
+            '<span class="ltr">{l}</span><span class="txt">{t}</span></div>'.format(
+                heavy=" wk" if dow == 6 else "", d=day, l=DAY_LETTERS[dow], t=entry))
+
+    boxes = []
+    for name, col, row in SECTIONS:
+        body = "" if blank else section_body(sections, name)
+        written = body.split("\n") if body else []
+        # Every line of the box is emitted, written or not: a printed box has
+        # to arrive already ruled, and a background gradient does not survive
+        # the browser's print rasteriser.
+        slots = R0_LINES if row == 0 else R1_LINES
+        lines = "".join(
+            '<div class="bl">%s</div>' % (html.escape(written[i]) if i < len(written) else "")
+            for i in range(max(slots, len(written))))
+        boxes.append(
+            '<div class="box c{c} r{r}"><div class="bt"><span>{n}</span></div>'
+            '<div class="brule"></div><div class="blines">{lines}</div></div>'.format(
+                c=col, r=row, n=html.escape(name.upper()), lines=lines))
+
+    return TEMPLATE.format(title=html.escape(title),
+                           rows="".join(rows), boxes="".join(boxes),
+                           pitch=PITCH, gap=RULE_GAP, r0title=R0_TITLE, gridh=GRID_H)
+
+
+TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
+  /* One landscape sheet; the two pages are placed on it, not paginated. */
+  @page {{ size: 11in 8.5in; margin: 0; }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ width: 11in; height: 8.5in; background: #fff; color: #000;
+          font-family: "JetBrains Mono", ui-monospace, monospace;
+          -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+
+  /* 10.5in of page on an 11in sheet leaves .25in either side; 7.25 on 8.5
+     leaves .625 top and bottom. The two pages meet in the middle, so one cut
+     down the centre and four round the outside separates them. */
+  .sheet {{ position: absolute; left: .25in; top: .625in;
+            width: 10.5in; height: 7.25in; display: flex; }}
+  .page {{ width: 5.25in; height: 7.25in; padding: .34in .30in;
+           position: relative; outline: .3pt solid #bbb; }}
+
+  .title {{ text-align: center; font-size: 11pt; letter-spacing: .06em;
+            padding-bottom: .07in; }}
+  .rule {{ border-bottom: .7pt solid #444; }}
+
+  /* 31 rows share whatever the title leaves. Both pages use the same pitch so
+     the ruling lines up across the cut. */
+  .rows {{ margin-top: {gap}in; }}
+  .row {{ height: {pitch}in; display: flex; align-items: flex-end;
+          border-bottom: .3pt solid #c9c9c9; }}
+  .row.wk {{ border-bottom: .7pt solid #6a6a6a; }}
+  .num {{ width: .26in; text-align: right; font-size: 7pt; padding-bottom: .022in; }}
+  .ltr {{ width: .17in; text-align: right; font-size: 7pt; padding-bottom: .022in;
+          padding-right: .07in; }}
+  .txt {{ flex: 1; font-size: 7.5pt; padding-bottom: .022in;
+          border-left: .3pt solid #c9c9c9; padding-left: .09in; }}
+
+  .grid {{ height: {gridh}in; display: flex; flex-wrap: wrap;
+           align-content: space-between; }}
+  .box {{ width: 48%; display: flex; flex-direction: column; }}
+  .box.r0 {{ height: 56%; }}
+  .box.r1 {{ height: 40%; }}
+  .box.c0 {{ margin-right: 4%; }}
+  /* The top row's heading occupies exactly the band the month title does on
+     the other page, so the rule beneath it lands on the same line -- one cut
+     down the middle then leaves two pages ruled alike. */
+  .bt {{ font-size: 7pt; letter-spacing: .09em; color: #444;
+         display: flex; align-items: flex-end; padding-bottom: .07in; }}
+  .box.r0 .bt {{ height: {r0title}in; }}
+  .brule {{ border-bottom: .7pt solid #444; }}
+  .blines {{ flex: 1; margin-top: {gap}in; overflow: hidden; }}
+  .bl {{ height: {pitch}in; font-size: 7.5pt; display: flex; align-items: flex-end;
+         padding-bottom: .022in; border-bottom: .3pt solid #c9c9c9; }}
+</style>
+<div class="sheet">
+  <div class="page">
+    <div class="title">{title}</div><div class="rule"></div>
+    <div class="rows">{rows}</div>
+  </div>
+  <div class="page">
+    <div class="grid">{boxes}</div>
+  </div>
+</div>
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("month", nargs="?", help="YYYY-MM (default: this month)")
+    ap.add_argument("--blank", action="store_true", help="ruling only")
+    ap.add_argument("-o", "--out", help="output PDF path")
+    args = ap.parse_args()
+
+    today = datetime.date.today()
+    if args.month:
+        year, month = int(args.month[:4]), int(args.month[5:7])
+    else:
+        year, month = today.year, today.month
+
+    key = "%04d-%02d" % (year, month)
+    days, sections = parse(os.path.join(vault_dir(), key + ".md"))
+    out = args.out or os.path.expanduser("~/Downloads/monthly-%s.pdf" % key)
+
+    browser = next((b for b in ("chromium", "google-chrome-stable", "google-chrome")
+                    if shutil.which(b)), None)
+    if not browser:
+        sys.exit("need chromium or google-chrome to render the PDF")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        page = os.path.join(tmp, "spread.html")
+        open(page, "w", encoding="utf-8").write(
+            build_html(year, month, days, sections, args.blank))
+        run = subprocess.run([browser, "--headless", "--disable-gpu",
+                              "--no-sandbox", "--no-pdf-header-footer",
+                              "--run-all-compositor-stages-before-draw",
+                              "--virtual-time-budget=4000",
+                              "--print-to-pdf=" + out, "file://" + page],
+                             capture_output=True, text=True)
+    if not os.path.exists(out):
+        sys.exit("render failed:\n" + (run.stderr or run.stdout)[-1500:])
+    print(out)
+
+
+if __name__ == "__main__":
+    main()

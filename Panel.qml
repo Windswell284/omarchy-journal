@@ -35,6 +35,13 @@ Panel {
   readonly property string folder: setting("folder", "Monthly Calendar")
   readonly property string journalDir: vaultDir + "/" + folder
 
+  // Where this plugin lives, so the print script can be found next to the QML
+  // wherever the plugin was installed.
+  readonly property string pluginDir: {
+    var here = Qt.resolvedUrl(".").toString()
+    return here.replace(/^file:\/\//, "").replace(/\/$/, "")
+  }
+
   // ---- Today, kept honest across midnight by SystemClock so the marked row
   //      rolls over without the panel being reopened.
   property date today: new Date()
@@ -328,6 +335,16 @@ Panel {
     root.spreadOpen = true
   }
 
+  // Render the month on screen as a cut-out spread and say where it went.
+  function printMonth() {
+    var key = Model.monthKey(root.headYear, root.headMonth)
+    printProc.command = ["bash", "-c",
+      "out=$(" + JSON.stringify(root.pluginDir + "/print-month") + " " + key + ")"
+      + " && notify-send 'Monthly calendar' \"Spread saved to $out\""
+      + " || notify-send -u critical 'Monthly calendar' 'Could not render the spread'"]
+    printProc.running = true
+  }
+
   function toggleSpread() {
     root.spreadOpen = !root.spreadOpen
     if (!root.spreadOpen) stopSectionEditing()
@@ -405,6 +422,11 @@ Panel {
 
   // FileView cannot create the directory it writes into, and the vault may not
   // exist yet on a fresh machine.
+  Process {
+    id: printProc
+    running: false
+  }
+
   Process {
     id: mkdirProc
     running: true
@@ -580,6 +602,7 @@ Panel {
         else if (t === "t" || t === "T") root.goToToday()
         else if (t === "s" || t === "S") root.toggleSpread()
         else if (t >= "1" && t <= "4") root.focusSection(parseInt(t, 10) - 1)
+        else if (t === "p" || t === "P") root.printMonth()
       }
 
       // ---- Heading: the month at the top of the view, with the two chevrons
@@ -701,6 +724,10 @@ Panel {
         clip: true
         model: root.days
         boundsBehavior: Flickable.StopAtBounds
+        // Rest on a line boundary rather than between two, so the log's rules
+        // stay in register with the facing page's instead of drifting in and
+        // out of it as you scroll.
+        snapMode: ListView.SnapToItem
         // Delegates hold text being typed into, so recycling one would hand a
         // half-written line to a different day.
         reuseItems: false
@@ -1092,7 +1119,7 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
           text: (root.editing || root.editingSection) ? "esc  done"
-            : root.spreadOpen ? "1-4  boxes     s  close     t  today" : "←→  month     ↵  write     s  facing page     t  today"
+            : root.spreadOpen ? "1-4  boxes     s  close     p  print     t  today" : "←→  month     ↵  write     s  facing page     t  today"
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.mutedColor
