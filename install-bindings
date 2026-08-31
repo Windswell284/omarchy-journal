@@ -5,7 +5,7 @@
 # manifest has no way to declare a key, and nothing in the install path touches
 # Hyprland. So the bindings are opt-in, and this puts them in for you.
 #
-#   ./install-bindings            add SUPER+M and SUPER+SHIFT+M
+#   ./install-bindings            add SUPER+M and SUPER+CTRL+M
 #   ./install-bindings --remove   take them out again
 set -euo pipefail
 
@@ -39,7 +39,7 @@ if [[ ${1:-} == --remove ]]; then
     { skip = 0; print }
   ' "$BINDINGS" > "${BINDINGS}.tmp" && mv "${BINDINGS}.tmp" "$BINDINGS"
   reload
-  say "removed. SUPER+M and SUPER+SHIFT+M are free again."
+  say "removed. SUPER+M and SUPER+CTRL+M are free again."
   exit 0
 fi
 
@@ -48,18 +48,28 @@ if grep -qF -- "$MARK" "$BINDINGS"; then
   exit 0
 fi
 
+# Squash a combo to modifiers-and-key with no spaces or pluses, so the config
+# spelling ("SUPER + CTRL + M") and the listing spelling ("SUPER CTRL + M")
+# compare equal. Getting this wrong is not harmless: the check silently passes
+# and the bind lands on top of whatever already held the key.
+canon() { tr -d ' +' | tr '[:lower:]' '[:upper:]'; }
+
 # Refuse to clobber a key that is already spoken for. The file is checked as
 # well as Omarchy's listing: the listing reflects live Hyprland state, and
 # `hyprctl reload` is asynchronous, so on its own it can report a key as free
 # for a moment after something else claimed it.
 bound_already() {
-  local combo=$1 pattern=${1//+/\\+}
+  local combo=$1 pattern=${1//+/\\+} want
   grep -qE "^[^-]*o\.bind\(\s*\"${pattern}\"" "$BINDINGS" && return 0
   command -v omarchy >/dev/null || return 1
-  omarchy menu keybindings --print 2>/dev/null | grep -qiE "^\s*${pattern}\s"
+  want=$(printf '%s' "$combo" | canon)
+  omarchy menu keybindings --print 2>/dev/null \
+    | awk -F'→' 'NF > 1 { print $1 }' \
+    | canon \
+    | grep -qx -- "$want"
 }
 
-for combo in "SUPER + M" "SUPER + SHIFT + M"; do
+for combo in "SUPER + M" "SUPER + CTRL + M"; do
   if bound_already "$combo"; then
     die "$combo is already bound. Edit $BINDINGS by hand, or rebind that first."
   fi
@@ -69,10 +79,10 @@ backup
 cat >> "$BINDINGS" <<'LUA'
 
 -- pyang.journal (monthly calendar)
-o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
-o.bind("SUPER + SHIFT + M", "Monthly calendar spread", "omarchy-shell pyang.journal spread")
+o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
+o.bind("SUPER + CTRL + M", "Monthly calendar (facing page)", "omarchy-shell pyang.journal spread")
 LUA
 reload
 say "added:"
-say "  SUPER + M          the day log"
-say "  SUPER + SHIFT + M  straight onto the facing page"
+say "  SUPER + M         the day log"
+say "  SUPER + CTRL + M  straight onto the facing page"
