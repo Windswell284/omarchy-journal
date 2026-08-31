@@ -1101,12 +1101,18 @@ Panel {
         anchors.right: parent.right
         height: root.footerHeight
 
+        // Just the note's name. The folder never changes, so spelling it out
+        // every time bought nothing and ran the label into the hints; the
+        // width is still bounded and elided as a backstop.
         Text {
           anchors.left: parent.left
           anchors.leftMargin: Style.space(10)
+          anchors.right: hints.left
+          anchors.rightMargin: Style.space(16)
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
-          text: root.folder + "/" + root.noteName
+          text: root.noteName
+          elide: Text.ElideRight
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.mutedColor
@@ -1114,6 +1120,7 @@ Panel {
         }
 
         Text {
+          id: hints
           anchors.right: parent.right
           anchors.rightMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
