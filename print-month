@@ -21,9 +21,15 @@ SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 # Page geometry, in inches. Everything below is derived, so the ruling, the
 # type and the number of lines cannot drift apart: change a font size or the
 # padding and the pitch re-solves to fit 31 days exactly.
-PAGE_W, PAGE_H = 5.25, 7.25
+SHEET_W, SHEET_H = 11.0, 8.5    # one landscape sheet
+PAGE_W, PAGE_H = 5.25, 7.75
 
-TITLE_PT, LABEL_PT, BODY_PT = 13.0, 8.0, 9.0
+# The right page's left edge is the spine side of the spread. Flush to the cut
+# there leaves the labels sitting on the paper's edge, so it gets an inset the
+# other three edges do not.
+INNER_PAD = .18
+
+TITLE_PT, LABEL_PT, BODY_PT = 15.0, 9.0, 10.0
 RULE_H, RULE_GAP = .010, .05
 
 def _block(points, pad_below):
@@ -139,6 +145,10 @@ def build_html(year, month, days, sections, blank, geo):
     return TEMPLATE.format(
         title=html.escape(title), rows="".join(rows), boxes="".join(boxes),
         pw=PAGE_W, ph=PAGE_H, padx=geo["pad"], pady=geo["pad"],
+        innerpad=round(geo["pad"] + INNER_PAD, 4),
+        sheetw=round(2 * PAGE_W, 4),
+        sheetx=round((SHEET_W - 2 * PAGE_W) / 2, 4),
+        sheety=round((SHEET_H - PAGE_H) / 2, 4),
         pitch=round(geo["pitch"], 4), gap=RULE_GAP, r0title=round(R0_TITLE, 4),
         gridh=round(geo["grid_h"], 4),
         titlept=TITLE_PT, labelpt=LABEL_PT, bodypt=BODY_PT)
@@ -155,10 +165,11 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
   /* 10.5in of page on an 11in sheet leaves .25in either side; 7.25 on 8.5
      leaves .625 top and bottom. The two pages meet in the middle, so one cut
      down the centre and four round the outside separates them. */
-  .sheet {{ position: absolute; left: .25in; top: .625in;
-            width: 10.5in; height: 7.25in; display: flex; }}
+  .sheet {{ position: absolute; left: {sheetx}in; top: {sheety}in;
+            width: {sheetw}in; height: {ph}in; display: flex; }}
   .page {{ width: {pw}in; height: {ph}in; padding: {pady}in {padx}in;
            position: relative; outline: .3pt solid #bbb; }}
+  .page.inner {{ padding-left: {innerpad}in; }}
 
   .title {{ text-align: center; font-size: {titlept}pt; letter-spacing: .06em;
             padding-bottom: .07in; }}
@@ -203,7 +214,7 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
     <div class="title">{title}</div><div class="rule"></div>
     <div class="rows">{rows}</div>
   </div>
-  <div class="page">
+  <div class="page inner">
     <div class="grid">{boxes}</div>
   </div>
 </div>

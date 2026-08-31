@@ -145,7 +145,7 @@ widget, so your change appears not to have taken effect.
 ## Printing
 
 `print-month` renders a month as a spread meant to be cut out and pasted into
-a notebook: two 5.25 x 7.25in pages side by side on one 11 x 8.5in landscape
+a notebook: two 5.25 x 7.75in pages side by side on one 11 x 8.5in landscape
 sheet, with hairline cut guides and both pages ruled at the same pitch.
 
 ```bash
