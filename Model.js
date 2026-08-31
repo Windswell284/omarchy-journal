@@ -137,7 +137,12 @@ function serializeMonth(year, month, entries, sections) {
     lines.push("")
     lines.push("## " + SECTIONS[i].title)
     lines.push("")
-    if (text) lines.push(text)
+    if (text) {
+      var body = text.split("\n")
+      for (var k = 0; k < body.length; k++) {
+        lines.push(body[k] === "" ? "" : "- " + stripBullet(body[k]))
+      }
+    }
   }
   return lines.join("\n") + "\n"
 }
@@ -183,6 +188,15 @@ function sectionIdForTitle(title) {
   return ""
 }
 
+// Section lines are stored as Markdown list items so Obsidian renders them as
+// a list, but the marker is punctuation rather than content: it is stripped on
+// the way in and put back on the way out, so nothing upstream ever sees it.
+var BULLET_RE = /^\s*[-*+\u2022]\s+/
+
+function stripBullet(line) {
+  return String(line).replace(BULLET_RE, "")
+}
+
 function parseSections(text) {
   var out = {}
   if (!text) return out
@@ -196,7 +210,7 @@ function parseSections(text) {
       buffer = []
       current = sectionIdForTitle(heading[1])
     } else if (current) {
-      buffer.push(lines[i])
+      buffer.push(stripBullet(lines[i]))
     }
   }
   if (current) out[current] = trimBlank(buffer)

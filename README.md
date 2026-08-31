@@ -113,12 +113,17 @@ They are stored in the same monthly note, under `## ` headings after the days:
 ```markdown
 ## Focus
 
-ship v2
+- ship v2
 
 ## Tasks
 
 - 3 emails to send
 ```
+
+Section lines are stored as Markdown list items, so they render as a list in
+Obsidian. The marker is punctuation rather than content: it is stripped on the
+way in and put back on the way out, so it never doubles up, and a line typed
+with its own `-` or `*` is not marked twice.
 
 Note that a bullet like `- 3 emails to send` sits under a heading and is *not*
 read back as the 3rd of the month: the note is split at its first `## ` heading

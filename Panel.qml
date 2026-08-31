@@ -1028,9 +1028,23 @@ Panel {
 
                   readonly property var field: lineField
 
+                  // Reserved on every line, inked only where something is
+                  // written, so the text starts in the same column whether or
+                  // not the line is used.
+                  Text {
+                    id: lineBullet
+                    anchors.left: parent.left
+                    anchors.verticalCenter: lineField.verticalCenter
+                    width: Style.space(11)
+                    text: lineField.text.length > 0 ? "•" : ""
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    color: root.mutedColor
+                  }
+
                   TextInput {
                     id: lineField
-                    anchors.left: parent.left
+                    anchors.left: lineBullet.right
                     anchors.right: parent.right
                     anchors.rightMargin: Style.space(6)
                     anchors.verticalCenter: parent.verticalCenter
