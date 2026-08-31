@@ -64,8 +64,17 @@ Panel {
   //      September is a September screen, and a heading taken from the top row
   //      would still be insisting on August.
   property int focusIndex: 0
+
+  //      The midpoint only answers for the wheel, though. Moving the cursor a
+  //      day at a time barely shifts the view -- `Contain` does not scroll at
+  //      all while the row is already on screen -- so arrowing off the 31st
+  //      onto the 1st would leave the heading naming the month just left.
+  //      Whichever of the two moved last owns the heading.
+  property bool headingFromCursor: false
+  readonly property int headIndex: root.headingFromCursor ? root.cursorIndex
+                                                          : root.focusIndex
   readonly property var focusDay: days.length > 0
-    ? days[Math.max(0, Math.min(focusIndex, days.length - 1))]
+    ? days[Math.max(0, Math.min(headIndex, days.length - 1))]
     : null
   readonly property int headYear: focusDay ? focusDay.year : today.getFullYear()
   readonly property int headMonth: focusDay ? focusDay.month : today.getMonth()
@@ -282,6 +291,7 @@ Panel {
   function goToIndex(index, edit) {
     if (index < 0 || index >= root.days.length) return
     root.cursorIndex = index
+    root.headingFromCursor = true
     if (edit === true) root.editing = true
     dayList.positionViewAtIndex(index, ListView.Contain)
   }
@@ -293,6 +303,7 @@ Panel {
     if (index < 0) return
     root.editing = false
     root.cursorIndex = index
+    root.headingFromCursor = true
     dayList.positionViewAtIndex(index, ListView.Beginning)
   }
 
@@ -308,6 +319,7 @@ Panel {
                                   root.today.getMonth(), root.today.getDate())
     if (index < 0) return
     root.cursorIndex = index
+    root.headingFromCursor = true
     dayList.positionViewAtIndex(index, ListView.Center)
   }
 
@@ -363,6 +375,10 @@ Panel {
   function updateFocusIndex() {
     var index = dayList.indexAt(dayList.width / 2, dayList.contentY + dayList.height / 2)
     if (index >= 0) root.focusIndex = index
+    // A drag or a wheel flick is the reader moving the view themselves, which
+    // is the midpoint's cue to take the heading back. Programmatic scrolls
+    // from positionViewAtIndex leave `movingVertically` false.
+    if (dayList.movingVertically) root.headingFromCursor = false
   }
 
   // -------------------------------------------------------------- lifecycle
@@ -855,6 +871,7 @@ Panel {
                                            dayRow.modelData.monthKey, text)
               onActiveFocusChanged: if (activeFocus) {
                 root.cursorIndex = dayRow.index
+                root.headingFromCursor = true
                 root.editing = true
                 root.editingSection = false
               }
