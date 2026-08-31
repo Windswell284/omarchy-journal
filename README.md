@@ -88,9 +88,10 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 The wheel scrolls the days continuously. Clicking the month name returns to
 today; the chevrons either side of it step a month at a time.
 
-The heading names whichever month is under the middle of the view and follows
-along as you scroll; it is shown at full strength for the current month and
-slightly dimmed for any other.
+The heading names the month you are in: the one under the middle of the view
+while you scroll, and the one the cursor is on the moment a key moves it, so
+stepping off the 31st onto the 1st turns the heading over with it. It is shown
+at full strength for the current month and slightly dimmed for any other.
 
 ## Keybindings
 
@@ -103,7 +104,7 @@ To add the bindings:
 
 ```bash
 cd ~/.config/omarchy/plugins/pyang.journal
-./install-bindings          # SUPER+M, and SUPER+SHIFT+M for the facing page
+./install-bindings          # SUPER+M, and SUPER+CTRL+M for the facing page
 ./install-bindings --remove  # take them out again
 ```
 
@@ -114,8 +115,8 @@ reports a config error. Running it twice is a no-op.
 Or add them yourself, to `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
-o.bind("SUPER + SHIFT + M", "Monthly calendar spread", "omarchy-shell pyang.journal spread")
+o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
+o.bind("SUPER + CTRL + M", "Monthly calendar (facing page)", "omarchy-shell pyang.journal spread")
 ```
 
 ## The facing page
