@@ -13,8 +13,9 @@ printed month carries whatever is already in it.
 import argparse, calendar, datetime, html, os, re, shutil, subprocess, sys, tempfile
 
 DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]          # Sunday-indexed
-SECTIONS = [("Goals / Focus", 0, 0), ("Tasks", 1, 0),
-            ("Grateful", 0, 1), ("Next Month", 1, 1)]
+# (title, column, row, old titles still accepted in existing notes)
+SECTIONS = [("Goals / Focus", 0, 0, ()), ("Tasks", 1, 0, ()),
+            ("Grateful", 0, 1, ()), ("Notes", 1, 1, ("Next Month",))]
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 
 # Page geometry, in inches. The CSS is generated from these so the ruling and
@@ -71,11 +72,12 @@ def parse(path):
     return days, sections
 
 
-def section_body(sections, title):
-    """Match headings loosely, the way the plugin does."""
-    want = re.sub(r"[\s/]+", "", title).lower()
+def section_body(sections, title, was=()):
+    """Match headings loosely, the way the plugin does, old names included."""
+    norm = lambda t: re.sub(r"[\s/]+", "", t).lower()
+    wanted = {norm(t) for t in (title,) + tuple(was)}
     for key, body in sections.items():
-        if re.sub(r"[\s/]+", "", key).lower() == want:
+        if norm(key) in wanted:
             return body
     return ""
 
@@ -94,8 +96,8 @@ def build_html(year, month, days, sections, blank):
                 heavy=" wk" if dow == 6 else "", d=day, l=DAY_LETTERS[dow], t=entry))
 
     boxes = []
-    for name, col, row in SECTIONS:
-        body = "" if blank else section_body(sections, name)
+    for name, col, row, was in SECTIONS:
+        body = "" if blank else section_body(sections, name, was)
         written = body.split("\n") if body else []
         # Every line of the box is emitted, written or not: a printed box has
         # to arrive already ruled, and a background gradient does not survive

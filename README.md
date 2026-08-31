@@ -104,8 +104,8 @@ bindings, so they have to be added by hand.
 ## The facing page
 
 A monthly spread is two pages. The right one holds four boxes for the month as
-a whole -- Goals / Focus and Tasks on the taller top row, Grateful and Next
-Month beneath. It stays shut until asked for, so the default is exactly the day
+a whole -- Goals / Focus and Tasks on the taller top row, Grateful and Notes
+beneath. It stays shut until asked for, so the default is exactly the day
 log. The boxes follow whichever month the heading names.
 
 They are stored in the same monthly note, under `## ` headings after the days:

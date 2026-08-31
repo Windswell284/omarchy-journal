@@ -25,11 +25,14 @@ var DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]
 
 // The facing page. Ids are internal; titles are what land in the note as "## "
 // headings and what the panel labels each box with.
+// `was` lists headings a section used to be written under. A note carrying an
+// old heading is read into the same section and rewritten under the new one, so
+// renaming a box migrates its contents instead of dropping them.
 var SECTIONS = [
-  { id: "goals",    title: "Goals / Focus" },
-  { id: "tasks",    title: "Tasks" },
-  { id: "grateful", title: "Grateful" },
-  { id: "next",     title: "Next Month" }
+  { id: "goals",    title: "Goals / Focus", was: [] },
+  { id: "tasks",    title: "Tasks",         was: [] },
+  { id: "grateful", title: "Grateful",      was: [] },
+  { id: "notes",    title: "Notes",         was: ["Next Month"] }
 ]
 
 var SECTION_RE = /^##\s+(.+?)\s*$/
@@ -164,10 +167,18 @@ function splitNote(text) {
 
 // Tolerant of spacing and slashes, so "## Goals/Focus" typed by hand in
 // Obsidian still matches the "Goals / Focus" we write.
+function normalizeTitle(title) {
+  return String(title).toLowerCase().replace(/[\s\/]+/g, "")
+}
+
 function sectionIdForTitle(title) {
-  var want = String(title).toLowerCase().replace(/[\s\/]+/g, "")
+  var want = normalizeTitle(title)
   for (var i = 0; i < SECTIONS.length; i++) {
-    if (SECTIONS[i].title.toLowerCase().replace(/[\s\/]+/g, "") === want) return SECTIONS[i].id
+    var section = SECTIONS[i]
+    if (normalizeTitle(section.title) === want) return section.id
+    for (var j = 0; j < section.was.length; j++) {
+      if (normalizeTitle(section.was[j]) === want) return section.id
+    }
   }
   return ""
 }
