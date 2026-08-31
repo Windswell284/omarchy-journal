@@ -323,6 +323,21 @@ Panel {
     dayList.positionViewAtIndex(index, ListView.Center)
   }
 
+  // The log is one stop in the Tab run, not thirty-one: Tab out of it and back
+  // returns to the day it was left on rather than to today or to the first of
+  // the month, so the round trip costs nothing.
+  // Shift+Tab reaches a handler as Key_Backtab on some paths and as Key_Tab
+  // with the modifier set on others. Anything that steps a Tab run has to
+  // accept both spellings or it walks forwards when asked to go back.
+  function steppingBack(event) {
+    return (event.modifiers & Qt.ShiftModifier) !== 0
+      || event.key === Qt.Key_Backtab
+  }
+
+  function focusDayLog() {
+    root.goToIndex(root.cursorIndex, true)
+  }
+
   function moveCursor(delta, edit) {
     var next = root.cursorIndex + delta
     if (next < 0 || next >= root.days.length) return
@@ -889,11 +904,17 @@ Panel {
                 } else if (event.key === Qt.Key_Up) {
                   root.moveCursor(-1, true)
                   event.accepted = true
-                } else if (event.key === Qt.Key_Tab) {
-                  root.moveCursor(1, true)
-                  event.accepted = true
-                } else if (event.key === Qt.Key_Backtab) {
-                  root.moveCursor(-1, true)
+                } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                  // Enter and Down already walk the days, so Tab is free to
+                  // mean the next section, which is the facing page's first
+                  // box -- opening the page if it is shut, as 1-4 do.
+                  //
+                  // Shift+Tab arrives either as Backtab or as Tab carrying the
+                  // modifier, depending on how the key reaches us; reading only
+                  // one of the two sends it forwards. PanelKeyCatcher tests
+                  // both and so do we.
+                  root.focusSection(root.steppingBack(event)
+                    ? root.sectionLayout.length - 1 : 0)
                   event.accepted = true
                 }
               }
@@ -984,14 +1005,14 @@ Panel {
               })
             }
 
-            // Tab walks the boxes in the order they are written, and wraps:
-            // there is nowhere else on the facing page for it to go, and a key
-            // that does nothing on the fourth box reads as broken rather than
-            // as the end of the run. Lands on the first line, the same place
-            // the 1-4 shortcuts land.
+            // Tab walks the boxes in the order they are written and, off
+            // either end, back to the day log -- which is one stop in the run
+            // rather than a page you have to leave by another key. Boxes land
+            // on their first line, the same place the 1-4 shortcuts land.
             function stepBox(delta) {
-              var n = root.sectionLayout.length
-              root.focusSection(((box.index + delta) % n + n) % n)
+              var next = box.index + delta
+              if (next < 0 || next >= root.sectionLayout.length) root.focusDayLog()
+              else root.focusSection(next)
             }
 
             x: box.modelData.col === 0 ? 0 : rightPage.colWidth + rightPage.colGap
@@ -1119,11 +1140,9 @@ Panel {
                       } else if (event.key === Qt.Key_Up) {
                         box.focusLine(lineRow.index - 1)
                         event.accepted = true
-                      } else if (event.key === Qt.Key_Tab) {
-                        box.stepBox(1)
-                        event.accepted = true
-                      } else if (event.key === Qt.Key_Backtab) {
-                        box.stepBox(-1)
+                      } else if (event.key === Qt.Key_Tab
+                                 || event.key === Qt.Key_Backtab) {
+                        box.stepBox(root.steppingBack(event) ? -1 : 1)
                         event.accepted = true
                       }
                     }
