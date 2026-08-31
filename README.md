@@ -11,16 +11,21 @@ Each month is kept as a plain Markdown note in your Obsidian vault, so the same
 log is editable from either side: type in the bar, or open the note and edit it
 in Obsidian, and both stay in step.
 
+![The panel, with the facing page open](docs/panel.png)
+
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/Windswell284/omarchy-journal --enable
 ```
 
-You will be asked which bar section to place it in. To update later:
+You will be asked which bar section to place it in. It installs under the id
+`pyang.journal` -- that is the name to use in `shell.json`, in `omarchy plugin`
+commands and in IPC calls.
 
 ```bash
-omarchy plugin update pyang.journal
+omarchy plugin update pyang.journal     # pull later changes
+omarchy plugin disable pyang.journal    # take it off the bar
 ```
 
 ## Where the notes go
@@ -136,6 +141,17 @@ IPC methods, for binding to keys: `open`, `close`, `toggle`, `spread`,
 
 `Panel.qml` is the whole widget — bar icon, panel, day rows, keys and file I/O.
 `Model.js` is the date arithmetic and the Markdown parse/serialize.
+`print-month` is standalone: it re-implements the note parsing in Python rather
+than sharing `Model.js`, so it can run without the shell.
+
+`Model.js` is plain JavaScript with one QML-only line at the top, so it can be
+exercised directly:
+
+```bash
+node -e 'const s=require("fs").readFileSync("Model.js","utf8").replace(/^\.pragma library\s*$/m,"");
+         const M={}; new Function("x", s+"\nObject.assign(x,{parseNote,serializeMonth})")(M);
+         console.log(M.parseNote("# Aug 2026\n\n- **1 S** hi\n"))'
+```
 
 One thing that will waste your afternoon otherwise: **run
 `omarchy restart shell` after editing the QML.** Saving logs
@@ -149,12 +165,16 @@ a notebook: two 5.25 x 7.75in pages side by side on one 11 x 8.5in landscape
 sheet, with hairline cut guides and both pages ruled at the same pitch.
 
 ```bash
+cd ~/.config/omarchy/plugins/pyang.journal
+
 ./print-month                 # this month, into ~/Downloads
 ./print-month 2026-08         # a given month
 ./print-month 2026-08 --blank # the ruling only, nothing filled in
 ./print-month -o spread.pdf   # somewhere else
 ./print-month --pad .14       # inset the content from the cut line
 ```
+
+![A blank spread, ready to cut out](docs/print.png)
 
 `--pad` is the one dial worth playing with. At the default of 0 the ruling runs
 right to the cut line, which gives the most writing room but leaves nothing for
@@ -176,8 +196,12 @@ case and rim are sampled proportions rather than invented ones.
 
 ## Requires
 
-Omarchy 3.x with the Quickshell-based `omarchy-shell`. Draws its bar icon with
-`QtQuick.Shapes`.
+Omarchy 3.x with the Quickshell-based `omarchy-shell`. The bar icon is drawn
+with `QtQuick.Shapes`, which ships with Qt 6.
+
+Printing additionally needs `python3` and either `chromium` or `google-chrome`
+on `PATH`. Nothing else in the plugin depends on them, so it works fine without
+if you never print.
 
 ## License
 
