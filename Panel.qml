@@ -786,13 +786,15 @@ Panel {
 
             // Reserved whether or not it is today's row, so the dates stay in
             // one column instead of jogging sideways on the day the arrow
-            // appears.
+            // appears. Sized to the glyph and no wider: every pixel here is
+            // rule sticking out to the left of the dates, where the eye reads
+            // it as the ruling overshooting rather than as a margin.
             Item {
               id: todayMark
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(2)
+              anchors.leftMargin: Style.space(1)
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(8)
+              width: Style.space(5)
               height: parent.height
 
               Text {
@@ -812,7 +814,7 @@ Panel {
             Text {
               id: dayNumber
               anchors.left: todayMark.right
-              anchors.leftMargin: Style.space(2)
+              anchors.leftMargin: Style.space(1)
               anchors.verticalCenter: parent.verticalCenter
               width: root.gutterWidth
               horizontalAlignment: Text.AlignRight
