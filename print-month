@@ -18,15 +18,37 @@ SECTIONS = [("Focus", 0, 0, ("Goals / Focus",)), ("Tasks", 1, 0, ()),
             ("Grateful", 0, 1, ()), ("Notes", 1, 1, ("Next Month",))]
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 
-# Page geometry, in inches. The CSS is generated from these so the ruling and
-# the number of ruled lines cannot drift apart.
-PITCH = .1935          # one ruled line, the same on both pages
-GRID_H = 6.62          # the facing page's four boxes together
-R0_H, R1_H = GRID_H * .56, GRID_H * .40
-R0_TITLE, R1_TITLE = .253, .167
+# Page geometry, in inches. Everything below is derived, so the ruling, the
+# type and the number of lines cannot drift apart: change a font size or the
+# padding and the pitch re-solves to fit 31 days exactly.
+PAGE_W, PAGE_H = 5.25, 7.25
+
+TITLE_PT, LABEL_PT, BODY_PT = 13.0, 8.0, 9.0
 RULE_H, RULE_GAP = .010, .05
-R0_LINES = int((R0_H - R0_TITLE - RULE_H - RULE_GAP) / PITCH)
-R1_LINES = int((R1_H - R1_TITLE - RULE_H - RULE_GAP) / PITCH)
+
+def _block(points, pad_below):
+    """Height of a heading: its line box plus the space under it."""
+    return points * 1.2 / 72.0 + pad_below
+
+TITLE_H = _block(TITLE_PT, .07)
+R0_TITLE = TITLE_H             # so the facing page's first rule matches
+R1_TITLE = _block(LABEL_PT, .07)
+
+
+def layout(pad):
+    """Solve the ruling for a given inset from the cut line.
+
+    31 days always fit exactly: the pitch is whatever height is left over after
+    the title, divided by 31. Raising the inset tightens the ruling rather than
+    running the last days off the page.
+    """
+    grid_h = PAGE_H - 2 * pad
+    pitch = (grid_h - TITLE_H - RULE_H - RULE_GAP) / 31.0
+    r0_h, r1_h = grid_h * .56, grid_h * .40
+    return dict(
+        pad=pad, pitch=pitch, grid_h=grid_h,
+        r0_lines=int((r0_h - R0_TITLE - RULE_H - RULE_GAP) / pitch),
+        r1_lines=int((r1_h - R1_TITLE - RULE_H - RULE_GAP) / pitch))
 LINE_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?\s*(\d{1,2})\s*[A-Za-z]?\s*(?:\*\*)?\s*(.*?)\s*$")
 
 
@@ -82,7 +104,7 @@ def section_body(sections, title, was=()):
     return ""
 
 
-def build_html(year, month, days, sections, blank):
+def build_html(year, month, days, sections, blank, geo):
     total = calendar.monthrange(year, month)[1]
     title = "%s %d" % (calendar.month_name[month], year)
 
@@ -102,7 +124,7 @@ def build_html(year, month, days, sections, blank):
         # Every line of the box is emitted, written or not: a printed box has
         # to arrive already ruled, and a background gradient does not survive
         # the browser's print rasteriser.
-        slots = R0_LINES if row == 0 else R1_LINES
+        slots = geo["r0_lines"] if row == 0 else geo["r1_lines"]
         lines = "".join(
             '<div class="bl">%s</div>' % (html.escape(written[i]) if i < len(written) else "")
             for i in range(max(slots, len(written))))
@@ -111,9 +133,12 @@ def build_html(year, month, days, sections, blank):
             '<div class="brule"></div><div class="blines">{lines}</div></div>'.format(
                 c=col, r=row, n=html.escape(name.upper()), lines=lines))
 
-    return TEMPLATE.format(title=html.escape(title),
-                           rows="".join(rows), boxes="".join(boxes),
-                           pitch=PITCH, gap=RULE_GAP, r0title=R0_TITLE, gridh=GRID_H)
+    return TEMPLATE.format(
+        title=html.escape(title), rows="".join(rows), boxes="".join(boxes),
+        pw=PAGE_W, ph=PAGE_H, padx=geo["pad"], pady=geo["pad"],
+        pitch=round(geo["pitch"], 4), gap=RULE_GAP, r0title=round(R0_TITLE, 4),
+        gridh=round(geo["grid_h"], 4),
+        titlept=TITLE_PT, labelpt=LABEL_PT, bodypt=BODY_PT)
 
 
 TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
@@ -129,10 +154,10 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
      down the centre and four round the outside separates them. */
   .sheet {{ position: absolute; left: .25in; top: .625in;
             width: 10.5in; height: 7.25in; display: flex; }}
-  .page {{ width: 5.25in; height: 7.25in; padding: .34in .30in;
+  .page {{ width: {pw}in; height: {ph}in; padding: {pady}in {padx}in;
            position: relative; outline: .3pt solid #bbb; }}
 
-  .title {{ text-align: center; font-size: 11pt; letter-spacing: .06em;
+  .title {{ text-align: center; font-size: {titlept}pt; letter-spacing: .06em;
             padding-bottom: .07in; }}
   .rule {{ border-bottom: .7pt solid #444; }}
 
@@ -142,11 +167,12 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
   .row {{ height: {pitch}in; display: flex; align-items: flex-end;
           border-bottom: .3pt solid #c9c9c9; }}
   .row.wk {{ border-bottom: .7pt solid #6a6a6a; }}
-  .num {{ width: .26in; text-align: right; font-size: 7pt; padding-bottom: .022in; }}
-  .ltr {{ width: .17in; text-align: right; font-size: 7pt; padding-bottom: .022in;
-          padding-right: .07in; }}
-  .txt {{ flex: 1; font-size: 7.5pt; padding-bottom: .022in;
-          border-left: .3pt solid #c9c9c9; padding-left: .09in; }}
+  .num {{ width: .30in; text-align: right; font-size: {labelpt}pt;
+          padding-bottom: .03in; }}
+  .ltr {{ width: .20in; text-align: right; font-size: {labelpt}pt;
+          padding-bottom: .03in; padding-right: .08in; }}
+  .txt {{ flex: 1; font-size: {bodypt}pt; padding-bottom: .03in;
+          border-left: .3pt solid #c9c9c9; padding-left: .10in; }}
 
   .grid {{ height: {gridh}in; display: flex; flex-wrap: wrap;
            align-content: space-between; }}
@@ -157,13 +183,14 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
   /* The top row's heading occupies exactly the band the month title does on
      the other page, so the rule beneath it lands on the same line -- one cut
      down the middle then leaves two pages ruled alike. */
-  .bt {{ font-size: 7pt; letter-spacing: .09em; color: #444;
+  .bt {{ font-size: {labelpt}pt; letter-spacing: .09em; color: #444;
          display: flex; align-items: flex-end; padding-bottom: .07in; }}
   .box.r0 .bt {{ height: {r0title}in; }}
   .brule {{ border-bottom: .7pt solid #444; }}
   .blines {{ flex: 1; margin-top: {gap}in; overflow: hidden; }}
-  .bl {{ height: {pitch}in; font-size: 7.5pt; display: flex; align-items: flex-end;
-         padding-bottom: .022in; border-bottom: .3pt solid #c9c9c9; }}
+  .bl {{ height: {pitch}in; font-size: {bodypt}pt; display: flex;
+         align-items: flex-end; padding-bottom: .03in;
+         border-bottom: .3pt solid #c9c9c9; }}
 </style>
 <div class="sheet">
   <div class="page">
@@ -182,6 +209,8 @@ def main():
     ap.add_argument("month", nargs="?", help="YYYY-MM (default: this month)")
     ap.add_argument("--blank", action="store_true", help="ruling only")
     ap.add_argument("-o", "--out", help="output PDF path")
+    ap.add_argument("--pad", type=float, default=0.0, metavar="IN",
+                    help="inset from the cut line, inches (default 0)")
     args = ap.parse_args()
 
     today = datetime.date.today()
@@ -202,7 +231,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         page = os.path.join(tmp, "spread.html")
         open(page, "w", encoding="utf-8").write(
-            build_html(year, month, days, sections, args.blank))
+            build_html(year, month, days, sections, args.blank, layout(args.pad)))
         run = subprocess.run([browser, "--headless", "--disable-gpu",
                               "--no-sandbox", "--no-pdf-header-footer",
                               "--run-all-compositor-stages-before-draw",

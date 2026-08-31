@@ -148,7 +148,14 @@ sheet, with hairline cut guides and both pages ruled at the same pitch.
 ./print-month 2026-08         # a given month
 ./print-month 2026-08 --blank # the ruling only, nothing filled in
 ./print-month -o spread.pdf   # somewhere else
+./print-month --pad .14       # inset the content from the cut line
 ```
+
+`--pad` is the one dial worth playing with. At the default of 0 the ruling runs
+right to the cut line, which gives the most writing room but leaves nothing for
+a crooked cut, and sits at the limit of what most printers will put on the
+page. The pitch re-solves around whatever you set, so 31 days always fit
+exactly rather than the last few running off.
 
 It reads the same note the panel writes and honours the same `vault`/`folder`
 override, so a printed month carries whatever is already in it. `--blank` gives
