@@ -75,7 +75,7 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `Left` / `Right`, `h` / `l` | Previous / next month |
 | `Up` / `Down`, `j` / `k` | Move a day — carries across month boundaries |
 | `Enter` | Start writing on the current day; again moves to the next |
-| `Tab` | Leave the day log for the facing page — opening it if shut |
+| `Tab` / `Shift+Tab` | Leave the day log for the facing page's first / last box — whether or not you are writing, opening the page if shut |
 | `Esc` | Stop writing, or close the panel |
 | `t` | Jump back to today |
 | `[` / `]` | Previous / next month |
@@ -85,7 +85,6 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
 | `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Grateful, Notes, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
-| `Tab` | Switch to the neighbouring bar panel — when not typing |
 
 The wheel scrolls the days continuously. Clicking the month name returns to
 today; the chevrons either side of it step a month at a time.

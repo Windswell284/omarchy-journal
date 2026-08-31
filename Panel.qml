@@ -334,6 +334,15 @@ Panel {
       || event.key === Qt.Key_Backtab
   }
 
+  // Tab leaves the log for the facing page whether or not a day is being typed
+  // in: the log is one stop in the run either way, and having the key mean the
+  // facing page only once you are mid-word is a distinction no one holds in
+  // their head. Costs Tab as the way to the neighbouring bar panel, which was
+  // its only meaning here when not typing.
+  function stepFromLog(direction) {
+    root.focusSection(direction < 0 ? root.sectionLayout.length - 1 : 0)
+  }
+
   function focusDayLog() {
     root.goToIndex(root.cursorIndex, true)
   }
@@ -624,7 +633,7 @@ Panel {
       }
       onActivateRequested: root.goToIndex(root.cursorIndex, true)
       onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTabRequested: function(direction) { root.stepFromLog(direction) }
       onTextKey: function(t) {
         if (t === "[") root.moveMonth(-1)
         else if (t === "]") root.moveMonth(1)
@@ -913,8 +922,7 @@ Panel {
                   // modifier, depending on how the key reaches us; reading only
                   // one of the two sends it forwards. PanelKeyCatcher tests
                   // both and so do we.
-                  root.focusSection(root.steppingBack(event)
-                    ? root.sectionLayout.length - 1 : 0)
+                  root.stepFromLog(root.steppingBack(event) ? -1 : 1)
                   event.accepted = true
                 }
               }
