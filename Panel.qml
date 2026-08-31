@@ -108,10 +108,10 @@ Panel {
 
   readonly property string headMonthKey: Model.monthKey(headYear, headMonth)
 
-  // Goals and Tasks carry the month's thinking and take the taller row;
+  // Focus and Tasks carry the month's thinking and take the taller row;
   // Grateful and Notes are shorter by nature and sit under them.
   readonly property var sectionLayout: [
-    { id: "goals",    title: "Goals / Focus", col: 0, row: 0 },
+    { id: "focus",    title: "Focus",         col: 0, row: 0 },
     { id: "tasks",    title: "Tasks",         col: 1, row: 0 },
     { id: "grateful", title: "Grateful",      col: 0, row: 1 },
     { id: "notes",    title: "Notes",         col: 1, row: 1 }
