@@ -19,7 +19,10 @@ in Obsidian, and both stay in step.
 omarchy plugin add https://github.com/Windswell284/omarchy-journal --enable
 ```
 
-You will be asked which bar section to place it in. It installs under the id
+You will be asked which bar section to place it in. That gets you the bar icon
+and the panel; **keys are a separate step** -- see [Keybindings](#keybindings).
+
+It installs under the id
 `pyang.journal` -- that is the name to use in `shell.json`, in `omarchy plugin`
 commands and in IPC calls.
 
@@ -89,22 +92,31 @@ The heading names whichever month is under the middle of the view and follows
 along as you scroll; it is shown at full strength for the current month and
 slightly dimmed for any other.
 
-## Optional keybinding
+## Keybindings
 
-To summon it from the keyboard, add this to `~/.config/hypr/bindings.lua`:
+**`omarchy plugin add` does not set up keys.** It places the widget in the bar
+and stops there: the plugin manifest has no way to declare a binding, and
+nothing in the install path touches Hyprland. So after installing, the bar icon
+works and every key inside the panel works, but nothing summons it.
+
+To add the bindings:
+
+```bash
+cd ~/.config/omarchy/plugins/pyang.journal
+./install-bindings          # SUPER+M, and SUPER+SHIFT+M for the facing page
+./install-bindings --remove  # take them out again
+```
+
+It backs `bindings.lua` up first, refuses rather than double-binding if either
+key is already spoken for, and reloads Hyprland, failing loudly if the reload
+reports a config error. Running it twice is a no-op.
+
+Or add them yourself, to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
-```
-
-To summon it straight onto the facing page:
-
-```lua
 o.bind("SUPER + SHIFT + M", "Monthly calendar spread", "omarchy-shell pyang.journal spread")
 ```
-
-`omarchy plugin add` places the widget in the bar but does not create these
-bindings, so they have to be added by hand.
 
 ## The facing page
 

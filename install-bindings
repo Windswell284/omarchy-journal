@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Add this plugin's Hyprland keybindings.
+#
+# `omarchy plugin add` places the widget in the bar and stops there -- the
+# manifest has no way to declare a key, and nothing in the install path touches
+# Hyprland. So the bindings are opt-in, and this puts them in for you.
+#
+#   ./install-bindings            add SUPER+M and SUPER+SHIFT+M
+#   ./install-bindings --remove   take them out again
+set -euo pipefail
+
+BINDINGS="${HOME}/.config/hypr/bindings.lua"
+MARK="-- pyang.journal (monthly calendar)"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+[[ -f $BINDINGS ]] || die "no $BINDINGS -- is this an Omarchy system?"
+
+backup() {
+  cp "$BINDINGS" "${BINDINGS}.bak.$(date +%s)"
+}
+
+reload() {
+  command -v hyprctl >/dev/null || return 0
+  hyprctl reload >/dev/null 2>&1 || true
+  local errs
+  errs=$(hyprctl configerrors 2>/dev/null | tr -d '[:space:]')
+  [[ -z $errs ]] || die "Hyprland reported config errors -- check $BINDINGS"
+}
+
+if [[ ${1:-} == --remove ]]; then
+  grep -qF -- "$MARK" "$BINDINGS" || { say "not installed, nothing to do"; exit 0; }
+  backup
+  # drop the marker line and the two binds that follow it
+  awk -v mark="$MARK" '
+    index($0, mark) { skip = 3; next }
+    skip > 0 && /^o\.bind\(/ { skip--; next }
+    { skip = 0; print }
+  ' "$BINDINGS" > "${BINDINGS}.tmp" && mv "${BINDINGS}.tmp" "$BINDINGS"
+  reload
+  say "removed. SUPER+M and SUPER+SHIFT+M are free again."
+  exit 0
+fi
+
+if grep -qF -- "$MARK" "$BINDINGS"; then
+  say "already installed -- nothing to do."
+  exit 0
+fi
+
+# Refuse to clobber a key that is already spoken for. The file is checked as
+# well as Omarchy's listing: the listing reflects live Hyprland state, and
+# `hyprctl reload` is asynchronous, so on its own it can report a key as free
+# for a moment after something else claimed it.
+bound_already() {
+  local combo=$1 pattern=${1//+/\\+}
+  grep -qE "^[^-]*o\.bind\(\s*\"${pattern}\"" "$BINDINGS" && return 0
+  command -v omarchy >/dev/null || return 1
+  omarchy menu keybindings --print 2>/dev/null | grep -qiE "^\s*${pattern}\s"
+}
+
+for combo in "SUPER + M" "SUPER + SHIFT + M"; do
+  if bound_already "$combo"; then
+    die "$combo is already bound. Edit $BINDINGS by hand, or rebind that first."
+  fi
+done
+
+backup
+cat >> "$BINDINGS" <<'LUA'
+
+-- pyang.journal (monthly calendar)
+o.bind("SUPER + M", "Monthly calendar", "omarchy-shell shell toggle pyang.journal")
+o.bind("SUPER + SHIFT + M", "Monthly calendar spread", "omarchy-shell pyang.journal spread")
+LUA
+reload
+say "added:"
+say "  SUPER + M          the day log"
+say "  SUPER + SHIFT + M  straight onto the facing page"
