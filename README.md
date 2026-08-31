@@ -82,8 +82,9 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `s` | Open or close the facing page |
 | `1` `2` `3` `4` | Jump into a facing-page box (opens it first if shut) |
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
+| `Tab` / `Shift+Tab` | Next / previous box — Focus, Tasks, Grateful, Notes, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
-| `Tab` | Switch to the neighbouring bar panel |
+| `Tab` | Switch to the neighbouring bar panel — when not typing |
 
 The wheel scrolls the days continuously. Clicking the month name returns to
 today; the chevrons either side of it step a month at a time.

@@ -984,6 +984,16 @@ Panel {
               })
             }
 
+            // Tab walks the boxes in the order they are written, and wraps:
+            // there is nowhere else on the facing page for it to go, and a key
+            // that does nothing on the fourth box reads as broken rather than
+            // as the end of the run. Lands on the first line, the same place
+            // the 1-4 shortcuts land.
+            function stepBox(delta) {
+              var n = root.sectionLayout.length
+              root.focusSection(((box.index + delta) % n + n) % n)
+            }
+
             x: box.modelData.col === 0 ? 0 : rightPage.colWidth + rightPage.colGap
             y: box.modelData.row === 0 ? 0 : rightPage.topHeight + rightPage.rowGap
             width: rightPage.colWidth
@@ -1108,6 +1118,12 @@ Panel {
                         event.accepted = true
                       } else if (event.key === Qt.Key_Up) {
                         box.focusLine(lineRow.index - 1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Tab) {
+                        box.stepBox(1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Backtab) {
+                        box.stepBox(-1)
                         event.accepted = true
                       }
                     }
