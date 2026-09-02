@@ -467,9 +467,28 @@ Panel {
     running: false
   }
 
+  // The bar assigns `settings` after this component is constructed, so
+  // `journalDir` still reads the default while we are being built. Making the
+  // directory here would plant an empty folder in the vault the user has
+  // configured their way out of, and leave the one they asked for missing.
+  // Wait for the path to settle instead, and make it again if shell.json
+  // moves it. `madeDir` is what keeps the two triggers from racing.
+  property string madeDir: ""
+
+  function ensureJournalDir() {
+    if (root.journalDir === "" || root.journalDir === root.madeDir) return
+    root.madeDir = root.journalDir
+    mkdirProc.running = true
+  }
+
+  // Both, deliberately: the path changes only when there is an override to
+  // apply, so an entry with no `vault` of its own would never fire it.
+  onSettingsChanged: Qt.callLater(root.ensureJournalDir)
+  onJournalDirChanged: Qt.callLater(root.ensureJournalDir)
+
   Process {
     id: mkdirProc
-    running: true
+    running: false
     command: ["mkdir", "-p", root.journalDir]
   }
 

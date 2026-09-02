@@ -48,7 +48,9 @@ layout and add `vault` and `folder`:
 ```
 
 `shell.json` hot-reloads on save, so the change applies immediately. The folder
-is created on first write if it does not already exist.
+is created if it does not already exist, at the path in force once the entry
+has been read -- so moving the vault makes the new folder rather than leaving
+an empty one behind at the old path.
 
 ## The note format
 
