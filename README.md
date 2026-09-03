@@ -11,7 +11,7 @@ Each month is kept as a plain Markdown note in your Obsidian vault, so the same
 log is editable from either side: type in the bar, or open the note and edit it
 in Obsidian, and both stay in step.
 
-![The panel, with the facing page open](docs/panel.png)
+![The panel](docs/panel.png)
 
 ## Install
 
@@ -77,13 +77,12 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `Left` / `Right`, `h` / `l` | Previous / next month |
 | `Up` / `Down`, `j` / `k` | Move a day — carries across month boundaries |
 | `Enter` | Start writing on the current day; again moves to the next |
-| `Tab` / `Shift+Tab` | Leave the day log for the facing page's first / last box — whether or not you are writing, opening the page if shut |
+| `Tab` / `Shift+Tab` | Leave the day log for the facing page's first / last box — whether or not you are writing |
 | `Esc` | Stop writing, or close the panel |
 | `t` | Jump back to today |
 | `[` / `]` | Previous / next month |
 | `{` / `}` | Previous / next year |
-| `s` | Open or close the facing page |
-| `1` `2` `3` `4` | Jump into a facing-page box (opens it first if shut) |
+| `1` `2` `3` `4` | Jump into a facing-page box |
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
 | `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Grateful, Notes, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
@@ -107,27 +106,27 @@ To add the bindings:
 
 ```bash
 cd ~/.config/omarchy/plugins/pyang.journal
-./install-bindings          # SUPER+M, and SUPER+CTRL+M for the facing page
-./install-bindings --remove  # take them out again
+./install-bindings          # SUPER+M
+./install-bindings --remove  # take it out again
 ```
 
-It backs `bindings.lua` up first, refuses rather than double-binding if either
+It backs `bindings.lua` up first, refuses rather than double-binding if the
 key is already spoken for, and reloads Hyprland, failing loudly if the reload
 reports a config error. Running it twice is a no-op.
 
-Or add them yourself, to `~/.config/hypr/bindings.lua`:
+Or add it yourself, to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
-o.bind("SUPER + CTRL + M", "Monthly calendar (facing page)", "omarchy-shell pyang.journal spread")
 ```
 
 ## The facing page
 
 A monthly spread is two pages. The right one holds four boxes for the month as
 a whole -- Focus and Tasks on the taller top row, Grateful and Notes
-beneath. It stays shut until asked for, so the default is exactly the day
-log. The boxes follow whichever month the heading names.
+beneath. Both pages are up whenever the panel is: the spread is the unit, and
+there is no one-page state to fold back to. The boxes follow whichever month
+the heading names.
 
 They are stored in the same monthly note, under `## ` headings after the days:
 
@@ -150,8 +149,10 @@ Note that a bullet like `- 3 emails to send` sits under a heading and is *not*
 read back as the 3rd of the month: the note is split at its first `## ` heading
 and days are only parsed above it.
 
-IPC methods, for binding to keys: `open`, `close`, `toggle`, `spread`,
-`toggleSpread` -- e.g. `omarchy-shell pyang.journal spread`.
+IPC methods, for binding to keys: `open`, `close`, `toggle` -- e.g.
+`omarchy-shell pyang.journal toggle`. `spread`, `toggleSpread` and
+`toggleWithSpread` are older names from when the facing page could be shut on
+its own; they still work, as `open` and `toggle`.
 
 ## Hacking on it
 

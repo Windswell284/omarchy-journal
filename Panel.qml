@@ -25,7 +25,7 @@ Panel {
   moduleName: "pyang.journal"
   ipcTarget: "pyang.journal"
   // Taking the handler over from Ui/Panel: only one may own a target, and the
-  // base one has no way to open straight onto the facing page.
+  // base one carries none of this plugin's own methods.
   manageIpc: false
 
   // ---- Where the notes live. Overridable per-entry in shell.json so the
@@ -106,9 +106,8 @@ Panel {
   property var loadedKeys: []
 
   // ---- The facing page. A real monthly spread is two pages: the day log on
-  //      the left, and boxes for the month's thinking on the right. It stays
-  //      shut until asked for, so the default is exactly the log it was.
-  property bool spreadOpen: false
+  //      the left, and boxes for the month's thinking on the right. Both are
+  //      always up -- there is no one-page state to fold back to.
   property bool editingSection: false
 
   // Section prose, keyed "2026-08|goals". Same deal as `entries`: read by the
@@ -354,21 +353,13 @@ Panel {
   }
 
   // Reach the boxes from the keyboard: 1-4 read across the grid the way it
-  // looks, opening the facing page first if it is shut.
+  // looks.
   function focusSection(index) {
     if (index < 0 || index >= root.sectionLayout.length) return
-    root.spreadOpen = true
     Qt.callLater(function() {
       var box = sectionBoxes.itemAt(index)
       if (box && box.focusLine) box.focusLine(0)
     })
-  }
-
-  // Summon straight onto the facing page. open() shuts it by default, so the
-  // order matters here.
-  function openSpread() {
-    if (!root.opened) root.open()
-    root.spreadOpen = true
   }
 
   // Render the month on screen as a cut-out spread and say where it went.
@@ -379,11 +370,6 @@ Panel {
       + " && notify-send 'Monthly calendar' \"Spread saved to $out\""
       + " || notify-send -u critical 'Monthly calendar' 'Could not render the spread'"]
     printProc.running = true
-  }
-
-  function toggleSpread() {
-    root.spreadOpen = !root.spreadOpen
-    if (!root.spreadOpen) stopSectionEditing()
   }
 
   function stopSectionEditing() {
@@ -408,9 +394,6 @@ Panel {
   // -------------------------------------------------------------- lifecycle
 
   function open() {
-    // Shut by default every time: the log is the thing, the facing page is
-    // something you go and get.
-    root.spreadOpen = false
     root.editingSection = false
     root.controller.show()
     // Deferred so the list has been laid out and has somewhere to scroll to.
@@ -450,8 +433,12 @@ Panel {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
-    function spread(): void { root.openSpread() }
-    function toggleSpread(): void { root.toggleSpread() }
+    // `spread`, `toggleSpread` and `toggleWithSpread` named a facing page that
+    // could be shut. It cannot be any more, so they are open() and toggle() --
+    // kept so an older keybinding still works rather than erroring.
+    function spread(): void { root.open() }
+    function toggleSpread(): void { root.toggle() }
+    function toggleWithSpread(): void { root.toggle() }
   }
 
   Timer {
@@ -628,7 +615,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(root.spreadOpen ? Style.space(1040) : Style.space(520))
+    contentWidth: panel.fittedContentWidth(Style.space(1040))
     contentHeight: panel.fittedContentHeight(
       root.headerHeight + 31 * root.rowHeight + root.footerHeight + Style.space(10),
       Style.space(860))
@@ -637,11 +624,8 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
 
-      // How wide one page is. Shut, the log has the whole card; open, the two
-      // pages split it either side of the spine.
-      readonly property int pageWidth: root.spreadOpen
-        ? Math.floor((width - root.spineGap * 2) / 2)
-        : width
+      // How wide one page is: the card split either side of the spine.
+      readonly property int pageWidth: Math.floor((width - root.spineGap * 2) / 2)
       // While a row owns the keyboard every key belongs to it -- including the
       // h/l/j/k that would otherwise be swallowed as navigation.
       blocked: root.editing || root.editingSection
@@ -659,7 +643,6 @@ Panel {
         else if (t === "{") root.moveMonth(-12)
         else if (t === "}") root.moveMonth(12)
         else if (t === "t" || t === "T") root.goToToday()
-        else if (t === "s" || t === "S") root.toggleSpread()
         else if (t >= "1" && t <= "4") root.focusSection(parseInt(t, 10) - 1)
         else if (t === "p" || t === "P") root.printMonth()
       }
@@ -732,31 +715,6 @@ Panel {
               cursorShape: Qt.PointingHandCursor
               onClicked: root.moveMonth(1)
             }
-          }
-        }
-
-        // Opens the facing page. Sits at the outer edge of the log, where a
-        // thumb would go to turn the page.
-        Text {
-          id: spreadToggle
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(8)
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.verticalCenterOffset: -root.headerBias
-          text: root.spreadOpen ? "󰄽" : "󰄾"
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.icon
-          color: spreadMouse.containsMouse
-            ? Style.hoverStateColor(root.fg, Color.accent)
-            : root.mutedColor
-
-          MouseArea {
-            id: spreadMouse
-            anchors.fill: parent
-            anchors.margins: -Style.space(6)
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleSpread()
           }
         }
 
@@ -935,7 +893,7 @@ Panel {
                 } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                   // Enter and Down already walk the days, so Tab is free to
                   // mean the next section, which is the facing page's first
-                  // box -- opening the page if it is shut, as 1-4 do.
+                  // box, as 1-4 do.
                   //
                   // Shift+Tab arrives either as Backtab or as Tab carrying the
                   // modifier, depending on how the key reaches us; reading only
@@ -962,7 +920,6 @@ Panel {
       // ---- The spine. Two pages of one notebook, not two panels.
       Rectangle {
         id: spine
-        visible: root.spreadOpen
         anchors.left: parent.left
         anchors.leftMargin: keyCatcher.pageWidth + root.spineGap
         anchors.top: parent.top
@@ -976,7 +933,6 @@ Panel {
       //      so writing lands on the lines rather than near them.
       Item {
         id: rightPage
-        visible: root.spreadOpen
         anchors.left: spine.right
         anchors.leftMargin: root.spineGap
         anchors.right: parent.right
@@ -1221,7 +1177,7 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
           text: (root.editing || root.editingSection) ? "esc  done"
-            : root.spreadOpen ? "1-4  boxes     s  close     p  print     t  today" : "←→  month     ↵  write     s  facing page     t  today"
+            : "←→  month     ↵  write     1-4  boxes     p  print     t  today"
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.mutedColor

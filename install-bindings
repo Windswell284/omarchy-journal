@@ -5,8 +5,8 @@
 # manifest has no way to declare a key, and nothing in the install path touches
 # Hyprland. So the bindings are opt-in, and this puts them in for you.
 #
-#   ./install-bindings            add SUPER+M and SUPER+CTRL+M
-#   ./install-bindings --remove   take them out again
+#   ./install-bindings            add SUPER+M
+#   ./install-bindings --remove   take it out again
 set -euo pipefail
 
 BINDINGS="${HOME}/.config/hypr/bindings.lua"
@@ -32,14 +32,15 @@ reload() {
 if [[ ${1:-} == --remove ]]; then
   grep -qF -- "$MARK" "$BINDINGS" || { say "not installed, nothing to do"; exit 0; }
   backup
-  # drop the marker line and the two binds that follow it
+  # drop the marker line and the bind that follows it -- still up to
+  # three, so a block left by an older two-key install comes out whole
   awk -v mark="$MARK" '
     index($0, mark) { skip = 3; next }
     skip > 0 && /^o\.bind\(/ { skip--; next }
     { skip = 0; print }
   ' "$BINDINGS" > "${BINDINGS}.tmp" && mv "${BINDINGS}.tmp" "$BINDINGS"
   reload
-  say "removed. SUPER+M and SUPER+CTRL+M are free again."
+  say "removed. SUPER+M is free again."
   exit 0
 fi
 
@@ -69,7 +70,7 @@ bound_already() {
     | grep -qx -- "$want"
 }
 
-for combo in "SUPER + M" "SUPER + CTRL + M"; do
+for combo in "SUPER + M"; do
   if bound_already "$combo"; then
     die "$combo is already bound. Edit $BINDINGS by hand, or rebind that first."
   fi
@@ -80,9 +81,6 @@ cat >> "$BINDINGS" <<'LUA'
 
 -- pyang.journal (monthly calendar)
 o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
-o.bind("SUPER + CTRL + M", "Monthly calendar (facing page)", "omarchy-shell pyang.journal spread")
 LUA
 reload
-say "added:"
-say "  SUPER + M         the day log"
-say "  SUPER + CTRL + M  straight onto the facing page"
+say "added: SUPER + M opens the month, log and facing page."
