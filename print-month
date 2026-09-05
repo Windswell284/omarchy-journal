@@ -15,7 +15,8 @@ import argparse, calendar, datetime, html, os, re, shutil, subprocess, sys, temp
 DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]          # Sunday-indexed
 # (title, column, row, old titles still accepted in existing notes)
 SECTIONS = [("Focus", 0, 0, ("Goals / Focus",)), ("Tasks", 1, 0, ()),
-            ("Grateful", 0, 1, ()), ("Notes", 1, 1, ("Next Month",))]
+            ("Grateful for", 0, 1, ("Grateful",)),
+            ("Notes", 1, 1, ("Next Month",))]
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 
 # Page geometry, in inches. Everything below is derived, so the ruling, the

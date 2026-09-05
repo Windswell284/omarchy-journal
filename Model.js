@@ -31,7 +31,7 @@ var DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]
 var SECTIONS = [
   { id: "focus",    title: "Focus",         was: ["Goals / Focus"] },
   { id: "tasks",    title: "Tasks",         was: [] },
-  { id: "grateful", title: "Grateful",      was: [] },
+  { id: "grateful", title: "Grateful for",  was: ["Grateful"] },
   { id: "notes",    title: "Notes",         was: ["Next Month"] }
 ]
 

@@ -121,7 +121,7 @@ Panel {
   readonly property var sectionLayout: [
     { id: "focus",    title: "Focus",         col: 0, row: 0 },
     { id: "tasks",    title: "Tasks",         col: 1, row: 0 },
-    { id: "grateful", title: "Grateful",      col: 0, row: 1 },
+    { id: "grateful", title: "Grateful for",  col: 0, row: 1 },
     { id: "notes",    title: "Notes",         col: 1, row: 1 }
   ]
 
