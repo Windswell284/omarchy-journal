@@ -184,7 +184,11 @@ of the entry; a calendar wants a structured start and end:
 | `1 pm Panza` | 13:00-14:00, "Panza" |
 | `2:15 pm David` | 14:15-15:15, "David" |
 | `9:30 am-11 am review` | 09:30-11:00, "review" |
+| `17:30 dinner` | 17:30-18:30, "dinner" |
 | `To Beijing` | all day, "To Beijing" |
+
+A time with no `am` or `pm` is read as a 24-hour clock, so `5:30 dinner` is
+half past five in the *morning*. Write `5:30 pm` or `17:30` for the evening.
 
 and back the other way, so an event you move to 4pm on your phone reappears in
 the note as `4 pm`. A line with no time is an all-day event, and an all-day
@@ -261,7 +265,7 @@ and rebuilt from the notes. The calendar is made on the first sync.
 ### Running it without being asked
 
 ```bash
-cp systemd/journal-sync.* ~/.config/systemd/user/
+cp systemd/journal-sync* ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now journal-sync.timer journal-sync.path
 ```
@@ -269,10 +273,21 @@ systemctl --user enable --now journal-sync.timer journal-sync.path
 Both triggers run the same service, and every run reconciles in both
 directions -- what is scheduled is the occasion, not the direction.
 
-The path unit covers the note-to-calendar half with no delay at all, firing as
-soon as the note is written, so a line typed in the bar is on the phone by the
-time you look. **It has the default vault path baked in** -- if yours is
-elsewhere, edit `PathChanged=` to match.
+The path unit covers the note-to-calendar half, firing once the note has been
+written and then left alone for a few seconds, so a line typed in the bar is on
+the phone by the time you look. **It has the default vault path baked in** --
+if yours is elsewhere, edit `PathChanged=` to match.
+
+The waiting matters. The panel saves 600ms after the last keystroke, so pointing
+the path unit straight at the sync put every pause in your typing on the
+calendar as an event of its own -- one line could cost seven writes, creating
+and deleting `5:40` and `5:` on the way to `dinner`, and a sync reading the note
+mid-rewrite could take the day letter into the title. `journal-sync-debounce`
+sits between them and waits for quiet. It waits by sampling mtimes rather than
+by watching, because a `.path` unit stops watching while the unit it triggered
+runs and inotify has no memory of what it missed -- so anything typed during a
+sync would otherwise wait for the hourly timer. `JOURNAL_SYNC_QUIET` sets how
+long the quiet has to be; the default is 3 seconds.
 
 The timer covers the other half, which nothing local can notice: an edit made
 on the phone touches this machine only when we go and look. Hourly, because

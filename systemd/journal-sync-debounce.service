@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync the journal once the note has stopped changing
+Documentation=https://github.com/Windswell284/omarchy-journal
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/omarchy/plugins/pyang.journal/journal-sync-debounce
+# Long enough for a slow pause in typing plus the sync, and short enough that a
+# stuck run is replaced by the next write rather than blocking it forever.
+TimeoutStartSec=5min
+Nice=10

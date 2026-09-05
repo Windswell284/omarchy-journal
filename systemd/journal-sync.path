@@ -1,13 +1,14 @@
 [Unit]
-Description=Sync the journal as soon as the note is written
+Description=Sync the journal once the note has been written and left alone
 Documentation=https://github.com/Windswell284/omarchy-journal
 
 [Path]
-# Catches the push half immediately, so typing in the bar reaches the phone
-# without waiting for the timer. Both the panel and journal-sync itself write
-# through a temp file and rename, which moves the directory's own mtime.
+# Catches the push half, so typing in the bar reaches the phone without waiting
+# for the timer. Through the debounce rather than straight at the sync: the
+# panel saves 600ms after the last keystroke, and firing on each of those put
+# every half-typed line on the calendar as an event of its own.
 PathChanged=%h/Documents/Obsidian/Monthly Calendar
-Unit=journal-sync.service
+Unit=journal-sync-debounce.service
 
 [Install]
 WantedBy=default.target

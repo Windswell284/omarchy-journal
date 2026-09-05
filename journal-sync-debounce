@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Sync once the note has stopped changing, rather than on every write.
+#
+# The panel saves 600ms after the last keystroke, so wiring journal-sync.path
+# straight to the sync pushed every pause in your typing to Google as a real
+# event and then deleted it -- seven writes for one line, and a window where a
+# half-typed line could be read mid-rewrite.
+#
+# So: wait for quiet first. The waiting is done by sampling mtimes rather than
+# by watching, deliberately. A .path unit stops watching while the unit it
+# triggered runs, and inotify has no memory of what it missed, so anything
+# typed between the trigger and the end of the sync would otherwise sit
+# unsynced until the hourly timer. Sampling has memory. That is the whole
+# reason this is a poll and not another watch.
+set -euo pipefail
+
+DIR="${JOURNAL_DIR:-$HOME/Documents/Obsidian/Monthly Calendar}"
+QUIET="${JOURNAL_SYNC_QUIET:-3}"
+
+sample() { find "$DIR" -maxdepth 1 -name '*.md' -printf '%T@ %s %p\n' 2>/dev/null | sort; }
+
+# Return once two samples QUIET seconds apart agree.
+settle() {
+  local prev="" cur
+  while :; do
+    cur=$(sample)
+    [[ $cur == "$prev" ]] && return 0
+    prev=$cur
+    sleep "$QUIET"
+  done
+}
+
+settle
+while :; do
+  systemctl --user start journal-sync.service
+  # The sync rewrites the note itself, so its own version is the baseline;
+  # anything that differs after this is someone still typing.
+  base=$(sample)
+  sleep "$QUIET"
+  [[ $(sample) == "$base" ]] && break
+  settle
+done
