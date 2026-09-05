@@ -27,10 +27,6 @@ TIME_RE = re.compile(_T, re.I)
 # their numbers instead of being read as a clock.
 LEAD_RE = re.compile(r"^\s*" + _T + r"\s*(?:[-‒-―]\s*" + _T + r")?\s*", re.I)
 TAIL_RE = re.compile(r"(?<!\w)" + _T + r"\s*(?:[-‒-―]\s*" + _T + r")?\s*$", re.I)
-# Only a segment that opens with a time is its own event, so a comma inside a
-# title ("dinner with Bob, Sue") does not split it in two.
-STARTS_TIME_RE = re.compile(r"^\s*\d{1,2}(?::\d{2})?\s*(?:[ap]\.?\s*m\.?|[-‒-―])", re.I)
-
 DEFAULT_MINUTES = 60
 
 
@@ -122,27 +118,36 @@ def fmt_time(mins):
 
 # --- day lines --------------------------------------------------------------
 
+def _follows(event):
+    """When an entry with no time of its own starts: as the one before ended.
+
+    None where there is nothing to follow -- the entry before was itself
+    all-day, or the hour after it falls past midnight and so out of this day.
+    """
+    start, end, _ = event
+    if start is None:
+        return None
+    after = end if end is not None else start + DEFAULT_MINUTES
+    return after if after < 24 * 60 else None
+
+
 def split_events(text):
     """One day's text as a list of (start, end, title) shorthand events.
 
-    Splits on commas, but only where the next segment opens with a time --
-    that is what tells "1 pm A, 2 pm B" (two events) from "dinner with Bob,
-    Sue" (one).
+    Every comma separates. An entry carrying no time of its own is all-day
+    when it opens the line, and otherwise starts where the entry before it
+    finished, so "5:30 pm dinner, Salvation" puts Salvation at 6:30. A
+    timeless entry with no timed entry before it stays all-day: there is
+    nothing for it to follow.
+
+    The cost is that a title can no longer hold a comma -- "dinner with Bob,
+    Sue" is two entries now. safe_title() is the other half of that.
     """
     text = text.strip()
     if not text:
         return []
-    parts, buf = [], ""
-    for seg in text.split(","):
-        if buf and STARTS_TIME_RE.match(seg):
-            parts.append(buf)
-            buf = seg
-        else:
-            buf = f"{buf},{seg}" if buf else seg
-    if buf.strip():
-        parts.append(buf)
     out = []
-    for p in parts:
+    for p in text.split(","):
         p = p.strip()
         if not p:
             continue
@@ -151,25 +156,23 @@ def split_events(text):
             end = None          # "1-2 pm" and "1 pm" are the same hour; saying
                                 # so here keeps the note and the calendar from
                                 # disagreeing about an event neither changed
-        if title:
-            out.append((start, end, title))
+        if not title:
+            continue
+        if start is None and out:
+            start = _follows(out[-1])
+        out.append((start, end, title))
     return out
-
-
-# A comma inside a title is only dangerous where the text after it would read
-# as the start of the next event -- that is the one case split_events divides on.
-UNSAFE_COMMA_RE = re.compile(r",(?=\s*\d{1,2}(?::\d{2})?\s*(?:[ap]\.?\s*m\.?|[-‒-―]))", re.I)
 
 
 def safe_title(title):
     """Keep a title from splitting itself in two when it is read back.
 
-    Titles arrive from the calendar, where a comma before a time is ordinary
-    prose ("Dinner, 7 pm at the club"). Written to the note unaltered it would
-    parse as two events on the next sync, and the real one would be deleted to
+    Titles arrive from the calendar, where a comma is ordinary prose
+    ("Dinner, 7 pm at the club"). Written to the note unaltered it would parse
+    as two entries on the next sync, and the real event would be deleted to
     make room for them. A semicolon reads the same and separates nothing.
     """
-    return UNSAFE_COMMA_RE.sub(";", title)
+    return title.replace(",", ";")
 
 
 def join_events(events):

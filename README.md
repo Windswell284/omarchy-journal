@@ -190,6 +190,29 @@ of the entry; a calendar wants a structured start and end:
 A time with no `am` or `pm` is read as a 24-hour clock, so `5:30 dinner` is
 half past five in the *morning*. Write `5:30 pm` or `17:30` for the evening.
 
+### One line, several entries
+
+A comma separates entries, always:
+
+| In the note | On the calendar |
+| --- | --- |
+| `1 pm A, 2 pm B` | two events |
+| `Salvation` | one all-day event |
+| `5:30 pm dinner, Salvation` | dinner at 17:30, Salvation at 18:30 |
+| `Salvation, 5 pm Dad` | Salvation all day, Dad at 17:00 |
+
+An entry with no time of its own is **all-day only where it opens the line**.
+Anywhere else it starts where the entry before it finished, so `Salvation`
+after a 5:30 pm dinner lands at 6:30 and the note is rewritten to say so. If
+the entry before it was itself all-day, or the hour after it would fall past
+midnight, there is nothing to follow and it stays all-day.
+
+Because every comma separates, **a title cannot contain one**. A calendar event
+called `Dinner, 7 pm at the club` is written into the note as
+`Dinner; 7 pm at the club` -- a semicolon reads the same and separates nothing.
+The calendar keeps its comma; only the note's rendering changes, and the two
+are compared in the note's alphabet so this never counts as an edit.
+
 and back the other way, so an event you move to 4pm on your phone reappears in
 the note as `4 pm`. A line with no time is an all-day event, and an all-day
 event comes home with no time.

@@ -20,8 +20,20 @@ Action = namedtuple("Action", "kind day payload")   # payload varies by kind
 CALENDAR_KINDS = ("create", "update", "delete")
 
 
+def _title(t):
+    """A title as the note is able to write it.
+
+    A comma separates entries in a day line, so a title carrying one reaches
+    the note as a semicolon (journal_notes.safe_title). Comparing the two
+    sides without that substitution makes a title pulled from the calendar
+    look edited on the very next run, and the sync answers by renaming the
+    calendar's own event to match the note's spelling of it.
+    """
+    return (t or "").replace(",", ";").casefold()
+
+
 def _key(e):
-    return (e.start, e.end, (e.title or "").casefold())
+    return (e.start, e.end, _title(e.title))
 
 
 def _match(journal, state):
@@ -42,7 +54,7 @@ def _match(journal, state):
                 sv = Ev(s["start"], s["end"], s["title"])
                 if ((tier == "exact" and _key(j) == _key(sv))
                         or (tier == "time" and j.start == s["start"] and j.start is not None)
-                        or (tier == "title" and j.title.casefold() == (s["title"] or "").casefold())):
+                        or (tier == "title" and _title(j.title) == _title(s["title"]))):
                     pairs[si] = ji
                     used_j.add(ji)
                     break
