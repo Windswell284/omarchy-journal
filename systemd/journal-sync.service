@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync the monthly journal note with Google Calendar
+Documentation=https://github.com/Windswell284/omarchy-journal
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/omarchy/plugins/pyang.journal/journal-sync sync
+# A sync that cannot reach Google is a normal outcome on a laptop, not a fault
+# worth a failed unit and a desktop notification.
+SuccessExitStatus=0 1
+Nice=10

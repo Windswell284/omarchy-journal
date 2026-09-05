@@ -154,12 +154,160 @@ IPC methods, for binding to keys: `open`, `close`, `toggle` -- e.g.
 `toggleWithSpread` are older names from when the facing page could be shut on
 its own; they still work, as `open` and `toggle`.
 
+## Google Calendar
+
+`journal-sync` keeps the monthly note and a Google Calendar in step, in both
+directions. The note is the thing you type in; the calendar is the thing you
+read on your phone. Either may be edited, and the sync works out which side
+moved by comparing both against what they agreed on at the end of the last run.
+
+It also means the note reaches your other devices without Obsidian being open.
+Obsidian Sync runs inside the Obsidian app, so a note written from the bar sits
+on disk until you next launch it; `journal-sync` is a plain script on a timer
+and has no such requirement.
+
+### What crosses over, and what does not
+
+Titles are passed through exactly as typed, in both directions. `dinner RHCC`
+goes to the calendar as `dinner RHCC` and comes back as `dinner RHCC`. Nothing
+guesses at your abbreviations, capitalises your names or rewrites your wording.
+
+The **time** is the part that is translated, because that is the part the two
+sides genuinely disagree about. A journal line writes it as text at the front
+of the entry; a calendar wants a structured start and end:
+
+| In the note | On the calendar |
+| --- | --- |
+| `1 pm Panza` | 13:00-14:00, "Panza" |
+| `2:15 pm David` | 14:15-15:15, "David" |
+| `9:30 am-11 am review` | 09:30-11:00, "review" |
+| `To Beijing` | all day, "To Beijing" |
+
+and back the other way, so an event you move to 4pm on your phone reappears in
+the note as `4 pm`. A line with no time is an all-day event, and an all-day
+event comes home with no time.
+
+An entry with no explicit end runs for an hour, so `1 pm` and `1-2 pm` mean the
+same thing and are written the same way. A longer range is kept as you wrote
+it.
+
+### The glossary, if you ever want it
+
+There is an optional lookup table for expanding shorthand into fuller titles --
+`RHCC` to `Rolling Hills Country Club` on the way out, and back again on the
+way in. **It is empty by default and changes nothing until you add to it.**
+
+```bash
+journal-sync glossary set RHCC 'Rolling Hills Country Club'
+journal-sync glossary set 'dinner RHCC' 'Dinner at Rolling Hills' --phrase
+journal-sync glossary list
+```
+
+A **term** is replaced wherever it appears as a whole word; a **phrase** matches
+a whole title and wins over any term. Because the same table runs backwards, a
+title retyped on your phone still comes home as shorthand.
+
+`journal-sync suggest` will propose entries: it shows Claude the lines each
+unfamiliar word appears in and asks it to expand only from evidence, refusing
+where the meaning is genuinely private. `--apply` writes the confident ones.
+It is an authoring aid for a table you own, not a step in the sync -- nothing
+Claude proposes reaches the calendar without you accepting it first.
+
+### Setting it up
+
+```bash
+sudo pacman -S python-google-api-python-client python-google-auth-oauthlib
+```
+
+Google needs an OAuth client of your own -- there is no shared one to borrow:
+
+1. At [console.cloud.google.com](https://console.cloud.google.com), make a project.
+2. Enable the **Google Calendar API** for it.
+3. Under **APIs & Services -> OAuth consent screen** (newer consoles call this
+   **Google Auth Platform**), set it up as *External*. The app name and contact
+   addresses are only ever shown to you.
+4. On that same screen, **publish the app**. This matters more than it looks:
+   while the publishing status is *Testing*, Google expires refresh tokens
+   after **seven days**, so the sync works for a week and then quietly stops
+   until you authorise again. Publishing removes the expiry, at the cost of an
+   "unverified app" warning at sign-in that you click past with *Advanced -> Go
+   to ... (unsafe)*. It is your own app, your own account, and a scope that
+   reaches nothing but the calendar it made. If you would rather not publish,
+   add yourself under *Test users* and expect to re-run `journal-sync auth`
+   weekly. That is livable: when the token goes, the sync raises a desktop
+   notification saying so rather than failing quietly in a timer, at most once
+   every six hours so one dead token cannot turn into a hundred notifications.
+5. Under **Credentials**, create an **OAuth client ID** of type *Desktop app*.
+6. Download the JSON and save it as
+   `~/.config/omarchy/journal/client_secret.json`.
+
+Then:
+
+```bash
+journal-sync auth      # opens a browser once
+journal-sync status    # check what it found
+journal-sync sync -n   # show the plan without doing anything
+journal-sync sync
+```
+
+The scope requested is `calendar.app.created`, which reaches **only calendars
+this tool made**. Your primary calendar is not visible to it, so the worst a
+bug can do is damage the `Journal` calendar it created -- which can be deleted
+and rebuilt from the notes. The calendar is made on the first sync.
+
+### Running it without being asked
+
+```bash
+cp systemd/journal-sync.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now journal-sync.timer journal-sync.path
+```
+
+The timer is the one that matters: an edit made on your phone touches nothing
+on this machine, so only the clock notices it. The path unit is a latency
+shortcut for the other direction, firing as soon as the note is written so a
+line typed in the bar reaches the phone without waiting. **It has the default
+vault path baked in** -- if yours is elsewhere, edit `PathChanged=` to match.
+
+### When both sides changed
+
+If an event was edited in the note *and* on the calendar since the last sync,
+`--prefer` decides. The default, `newer`, compares the note's modification time
+against the event's; `journal` and `gcal` force a side. Where `newer` cannot
+tell, the event is left alone and written to
+`~/.config/omarchy/journal/conflicts.log` rather than resolved by guesswork.
+
+### What is not synced
+
+Only the day log. **Focus**, **Tasks**, **Grateful** and **Notes** have no
+counterpart in a calendar and are left untouched -- so if this is replacing
+Obsidian Sync outright, those four sections stop reaching your other devices.
+Everything else in the note is preserved byte for byte: only the day lines that
+actually changed are rewritten.
+
 ## Hacking on it
 
 `Panel.qml` is the whole widget — bar icon, panel, day rows, keys and file I/O.
 `Model.js` is the date arithmetic and the Markdown parse/serialize.
 `print-month` is standalone: it re-implements the note parsing in Python rather
 than sharing `Model.js`, so it can run without the shell.
+
+`journal-sync` is the Google Calendar side, split so the parts that are easy to
+get subtly wrong can be tested without a network. `journal_notes.py` is the
+note format and the glossary -- pure functions over strings. `journal_reconcile.py`
+decides what a sync should do and returns it as a list of actions, touching
+nothing; `journal-sync` itself is the I/O and the Calendar API. That split is
+what lets the whole two-way loop -- including edits arriving from a phone -- run
+against a fake calendar in-process:
+
+```bash
+./test-sync    # no credentials, no network, temporary vault
+```
+
+Each step there is followed by a second sync that must do nothing. That is the
+assertion worth keeping: a sync which cannot leave the two sides agreeing will
+push its own last change back and forth forever, and testing each direction
+once will not catch it.
 
 `Model.js` is plain JavaScript with one QML-only line at the top, so it can be
 exercised directly:
@@ -217,8 +365,10 @@ Omarchy 3.x with the Quickshell-based `omarchy-shell`. The bar icon is drawn
 with `QtQuick.Shapes`, which ships with Qt 6.
 
 Printing additionally needs `python3` and either `chromium` or `google-chrome`
-on `PATH`. Nothing else in the plugin depends on them, so it works fine without
-if you never print.
+on `PATH`. Calendar sync needs `python3`,
+`python-google-api-python-client` and `python-google-auth-oauthlib`, and the
+`claude` CLI for `suggest` alone. Nothing else in the plugin depends on any of
+them, so the bar and the panel work fine without if you never print or sync.
 
 ## License
 

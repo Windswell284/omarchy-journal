@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync the journal every few minutes
+Documentation=https://github.com/Windswell284/omarchy-journal
+
+[Timer]
+# The pull half needs polling: an edit made on the phone touches nothing here,
+# so only the clock can notice it.
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

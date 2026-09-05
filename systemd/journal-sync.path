@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync the journal as soon as the note is written
+Documentation=https://github.com/Windswell284/omarchy-journal
+
+[Path]
+# Catches the push half immediately, so typing in the bar reaches the phone
+# without waiting for the timer. Both the panel and journal-sync itself write
+# through a temp file and rename, which moves the directory's own mtime.
+PathChanged=%h/Documents/Obsidian/Monthly Calendar
+Unit=journal-sync.service
+
+[Install]
+WantedBy=default.target

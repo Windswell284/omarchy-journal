@@ -1,0 +1,697 @@
+#!/usr/bin/env python3
+"""Two-way sync between the monthly note and a Google Calendar.
+
+  journal-sync auth                 one-time: authorise against Google
+  journal-sync sync [--dry-run]     reconcile note and calendar
+  journal-sync status               what is configured and what is pending
+  journal-sync suggest [--apply]    propose glossary entries for new shorthand
+  journal-sync glossary ...         list / set / remove entries by hand
+
+The note is the thing you type in; the calendar is the thing you read on your
+phone. Either may be edited, so the sync is two-way, mediated by a glossary
+that expands shorthand on the way out and contracts it on the way back.
+
+Only a calendar this tool created is ever touched -- the OAuth scope is
+`calendar.app.created`, which cannot see your primary calendar at all.
+"""
+
+import argparse, datetime, json, os, subprocess, sys, zoneinfo
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import journal_notes as N
+import journal_reconcile as R
+from journal_reconcile import Ev
+
+CONFIG_DIR = os.path.expanduser("~/.config/omarchy/journal")
+CONFIG = os.path.join(CONFIG_DIR, "config.json")
+GLOSSARY = os.path.join(CONFIG_DIR, "glossary.json")
+STATE = os.path.join(CONFIG_DIR, "state.json")
+CLIENT_SECRET = os.path.join(CONFIG_DIR, "client_secret.json")
+TOKEN = os.path.join(CONFIG_DIR, "token.json")
+CONFLICTS = os.path.join(CONFIG_DIR, "conflicts.log")
+NOTIFIED = os.path.join(CONFIG_DIR, "reauth-notified")
+
+# An app left in Testing on the Google console gets refresh tokens that expire
+# after a week. On a timer that failure is invisible: the sync simply stops and
+# the note and the calendar drift apart until someone notices. So say it out
+# loud, on the desktop, where a background job otherwise has no voice.
+RENOTIFY_AFTER = 6 * 3600
+
+# Only calendars this tool made. It cannot read, let alone write, the primary
+# calendar -- so the worst a bug can do is corrupt the journal's own calendar.
+SCOPES = ["https://www.googleapis.com/auth/calendar.app.created"]
+CALENDAR_NAME = "Journal"
+
+
+# --- config -----------------------------------------------------------------
+
+def _read_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except json.JSONDecodeError as e:
+        sys.exit(f"journal-sync: {path} is not valid JSON ({e})")
+
+
+def _write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def vault_dir():
+    """Honour a vault/folder override in shell.json, else the default.
+
+    Deliberately the same lookup `print-month` does, so the three ways into a
+    note -- the panel, the printer and the sync -- cannot disagree about where
+    it lives.
+    """
+    home = os.path.expanduser("~")
+    vault, folder = home + "/Documents/Obsidian", "Monthly Calendar"
+    try:
+        cfg = json.load(open(home + "/.config/omarchy/shell.json"))
+        for section in cfg.get("bar", {}).get("layout", {}).values():
+            for entry in section:
+                if entry.get("id") == "pyang.journal":
+                    vault = entry.get("vault", vault)
+                    folder = entry.get("folder", folder)
+    except Exception:
+        pass
+    return os.path.join(vault, folder)
+
+
+def config():
+    cfg = _read_json(CONFIG, {})
+    cfg.setdefault("timezone", _local_tz())
+    cfg.setdefault("calendar_name", CALENDAR_NAME)
+    cfg.setdefault("months", 3)
+    cfg.setdefault("prefer", "newer")
+    cfg.setdefault("default_minutes", N.DEFAULT_MINUTES)
+    return cfg
+
+
+def _local_tz():
+    try:
+        return subprocess.run(["timedatectl", "show", "-p", "Timezone", "--value"],
+                              capture_output=True, text=True, timeout=5).stdout.strip() or "UTC"
+    except Exception:
+        return "UTC"
+
+
+# --- the note ---------------------------------------------------------------
+
+def note_path(month):
+    return os.path.join(vault_dir(), f"{month}.md")
+
+
+def read_month(month):
+    """(days-as-events, raw text, mtime) for a month, empty if there is no note."""
+    path = note_path(month)
+    try:
+        text = open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        return {}, None, None
+    days, _ = N.parse_note(text)
+    evs = {d: [Ev(*e) for e in N.split_events(t)] for d, t in days.items() if t.strip()}
+    mtime = datetime.datetime.fromtimestamp(
+        os.path.getmtime(path), datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    return evs, text, mtime
+
+
+def write_days(month, updates):
+    """Rewrite only the day lines that changed, leaving the rest of the note alone."""
+    path = note_path(month)
+    try:
+        text = open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        sys.exit(f"journal-sync: no note at {path} to write back into")
+    for day, events in sorted(updates.items()):
+        body = N.join_events([(e.start, e.end, e.title) for e in events])
+        text, ok = N.replace_day(text, day, body)
+        if not ok:
+            print(f"  ! day {day} has no line in {month}.md; skipped", file=sys.stderr)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+# --- Google -----------------------------------------------------------------
+
+def _google():
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+    except ImportError:
+        sys.exit("journal-sync: needs the Google client libraries.\n"
+                 "  sudo pacman -S python-google-api-python-client "
+                 "python-google-auth-oauthlib")
+    return Credentials, Request, build
+
+
+def service(interactive=False):
+    from google.auth.exceptions import RefreshError, TransportError
+    Credentials, Request, build = _google()
+    creds = None
+    if os.path.exists(TOKEN):
+        creds = Credentials.from_authorized_user_file(TOKEN, SCOPES)
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            _save_token(creds)
+        except RefreshError as e:
+            if interactive:
+                creds = None                     # `auth` will just sign in again
+            else:
+                _expired(e)
+        except TransportError as e:
+            # No network is an ordinary state for a laptop, not a fault.
+            sys.exit(f"journal-sync: cannot reach Google ({e}); will retry")
+    if not creds or not creds.valid:
+        if not interactive:
+            sys.exit("journal-sync: not authorised yet -- run `journal-sync auth`")
+        creds = _authorise()
+    return build("calendar", "v3", credentials=creds, cache_discovery=False)
+
+
+def _expired(err):
+    """Google has cut the token loose. Say so where it will actually be seen."""
+    detail = str(err)
+    revoked = "invalid_grant" in detail or "expired or revoked" in detail
+    why = ("Google expired the sign-in. Apps left in Testing on the Google "
+           "console get seven-day tokens." if revoked else
+           "Google rejected the saved sign-in.")
+    _notify("Journal sync needs signing in again", f"{why}\n\nRun: journal-sync auth")
+    sys.exit(f"journal-sync: {why}\n  run `journal-sync auth` to sign in again\n"
+             f"  ({detail[:200]})")
+
+
+def _notify(title, body):
+    """One desktop notification, at most every few hours.
+
+    A timer that fires every ten minutes would otherwise turn one expired token
+    into a hundred notifications a day, which is a good way to teach someone to
+    ignore them.
+    """
+    import time
+    try:
+        if time.time() - os.path.getmtime(NOTIFIED) < RENOTIFY_AFTER:
+            return
+    except FileNotFoundError:
+        pass
+    try:
+        subprocess.run(["notify-send", "--urgency=normal",
+                        "--app-name=journal-sync", "--icon=x-office-calendar",
+                        title, body], timeout=5, check=False)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        open(NOTIFIED, "w").close()
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass                                     # no notification daemon; the exit text stands
+
+
+def _save_token(creds):
+    _write_json(TOKEN, json.loads(creds.to_json()))
+    os.chmod(TOKEN, 0o600)
+    # A fresh token clears the warning, so the next expiry is announced again
+    # rather than being swallowed by the rate limit.
+    try:
+        os.remove(NOTIFIED)
+    except FileNotFoundError:
+        pass
+
+
+def _authorise():
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    if not os.path.exists(CLIENT_SECRET):
+        sys.exit(f"journal-sync: put your OAuth client JSON at\n  {CLIENT_SECRET}\n"
+                 "See the Google Calendar section of the README for how to make one.")
+    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, SCOPES)
+    creds = flow.run_local_server(port=0, prompt="consent")
+    _save_token(creds)
+    return creds
+
+
+def ensure_calendar(svc, state, name, create=True):
+    """The tool's own calendar, made on first use and remembered thereafter.
+
+    `create=False` looks without making, for a dry run. Creating one there
+    would leave a calendar behind that nothing remembers -- a dry run does not
+    save state -- and the next run would make another.
+    """
+    cal_id = state.get("calendar_id")
+    if cal_id:
+        try:
+            svc.calendars().get(calendarId=cal_id).execute()
+            return cal_id
+        except Exception:
+            print(f"  ! calendar {cal_id} is gone; making a new one", file=sys.stderr)
+    if not create:
+        return None
+    made = svc.calendars().insert(body={"summary": name,
+                                        "timeZone": config()["timezone"]}).execute()
+    state["calendar_id"] = made["id"]
+    return made["id"]
+
+
+def _tzobj(cfg):
+    try:
+        return zoneinfo.ZoneInfo(cfg["timezone"])
+    except Exception:
+        return datetime.timezone.utc
+
+
+def to_gcal(month, day, ev, summary, cfg):
+    """A journal event as a Calendar API body."""
+    y, m = (int(x) for x in month.split("-"))
+    date = datetime.date(y, m, day)
+    body = {"summary": summary,
+            "extendedProperties": {"private": {"journal": N.join_events(
+                [(ev.start, ev.end, ev.title)])}}}
+    if ev.start is None:
+        body["start"] = {"date": date.isoformat()}
+        body["end"] = {"date": (date + datetime.timedelta(days=1)).isoformat()}
+    else:
+        tz = _tzobj(cfg)
+        start = datetime.datetime.combine(date, datetime.time()) + datetime.timedelta(minutes=ev.start)
+        end_m = ev.end if ev.end is not None else ev.start + cfg["default_minutes"]
+        end = datetime.datetime.combine(date, datetime.time()) + datetime.timedelta(minutes=end_m)
+        body["start"] = {"dateTime": start.replace(tzinfo=tz).isoformat(), "timeZone": cfg["timezone"]}
+        body["end"] = {"dateTime": end.replace(tzinfo=tz).isoformat(), "timeZone": cfg["timezone"]}
+    return body
+
+
+def from_gcal(e, cfg):
+    """A Calendar API event as (day, normalised dict), or None if unusable."""
+    s, en = e.get("start", {}), e.get("end", {})
+    if "date" in s:
+        day = datetime.date.fromisoformat(s["date"]).day
+        start = end = None
+    elif "dateTime" in s:
+        tz = _tzobj(cfg)
+        sd = datetime.datetime.fromisoformat(s["dateTime"]).astimezone(tz)
+        day, start = sd.day, sd.hour * 60 + sd.minute
+        end = None
+        if "dateTime" in en:
+            ed = datetime.datetime.fromisoformat(en["dateTime"]).astimezone(tz)
+            mins = ed.hour * 60 + ed.minute
+            if ed.date() == sd.date() and mins != start + cfg["default_minutes"]:
+                end = mins
+    else:
+        return None
+    return day, {"id": e["id"], "start": start, "end": end,
+                 "summary": (e.get("summary") or "").strip(), "updated": e.get("updated", "")}
+
+
+def fetch_month(svc, cal_id, month, cfg):
+    """Every event in a month, grouped by day."""
+    y, m = (int(x) for x in month.split("-"))
+    tz = _tzobj(cfg)
+    lo = datetime.datetime(y, m, 1, tzinfo=tz)
+    hi = datetime.datetime(y + (m == 12), m % 12 + 1, 1, tzinfo=tz)
+    out, token = {}, None
+    while True:
+        resp = svc.events().list(calendarId=cal_id, timeMin=lo.isoformat(),
+                                 timeMax=hi.isoformat(), singleEvents=True,
+                                 showDeleted=False, maxResults=2500,
+                                 pageToken=token).execute()
+        for e in resp.get("items", []):
+            got = from_gcal(e, cfg)
+            if got:
+                out.setdefault(got[0], []).append(got[1])
+        token = resp.get("nextPageToken")
+        if not token:
+            return out
+
+
+# --- sync -------------------------------------------------------------------
+
+def months_window(cfg, only=None):
+    if only:
+        return [only]
+    today = datetime.date.today()
+    out, y, m = [], today.year, today.month
+    for _ in range(max(1, cfg["months"])):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = y + (m == 12), m % 12 + 1
+    return out
+
+
+def cmd_sync(args):
+    cfg = config()
+    gl = N.Glossary.load(_read_json(GLOSSARY, {}))
+    state = _read_json(STATE, {})
+    svc = None if args.dry_run and not args.online else service()
+    cal_id = state.get("calendar_id")
+    if svc is not None:
+        cal_id = ensure_calendar(svc, state, cfg["calendar_name"],
+                                 create=not args.dry_run)
+        if cal_id is None:
+            print(f"(the {cfg['calendar_name']!r} calendar does not exist yet; "
+                  f"a real sync would create it)")
+
+    total = 0
+    for month in months_window(cfg, args.month):
+        days, _, mtime = read_month(month)
+        if not days and not os.path.exists(note_path(month)):
+            continue
+        gcal = fetch_month(svc, cal_id, month, cfg) if svc and cal_id else {}
+        saved = {int(k): v for k, v in state.get("months", {}).get(month, {}).items()}
+        actions = R.plan(days, gcal, saved, gl, prefer=args.prefer or cfg["prefer"],
+                         note_mtime=mtime)
+        if not actions:
+            continue
+        total += len(actions)
+        print(f"{month}:")
+        if args.dry_run:
+            for a in actions:
+                print(f"  {_describe(a)}")
+            continue
+        _apply(svc, cal_id, month, actions, state, cfg, gl)
+    if args.dry_run:
+        print("(dry run -- nothing was changed)" if total else "nothing to do")
+        return
+    _write_json(STATE, state)
+    if not total:
+        print("nothing to do")
+
+
+def _describe(a):
+    p = a.payload
+    if a.kind == "note":
+        body = N.join_events([(e.start, e.end, e.title) for e in p["events"]])
+        return f"note    {a.day:>2}: {body or '(cleared)'}"
+    if a.kind in ("create", "update"):
+        return f"{a.kind:<7} {a.day:>2}: {p['summary']!r}"
+    if a.kind == "delete":
+        return f"delete  {a.day:>2}: {p['was'].get('summary')!r}" + (" (already gone)" if p.get("gone") else "")
+    if a.kind == "pull":
+        return f"pull    {a.day:>2}: {p['gcal']['summary']!r} (edited on the calendar)"
+    if a.kind == "adopt":
+        return f"adopt   {a.day:>2}: {p['gcal']['summary']!r} (new on the calendar)"
+    return f"CONFLICT {a.day:>2}: note {p['journal'] and p['journal'].title!r} vs calendar {p['gcal'] and p['gcal']['summary']!r}"
+
+
+def _apply(svc, cal_id, month, actions, state, cfg, gl):
+    months = state.setdefault("months", {})
+    saved = months.setdefault(month, {})
+    note_updates, conflicts = {}, []
+
+    for a in actions:
+        p = a.payload
+        key = str(a.day)
+        entries = saved.setdefault(key, [])
+        print(f"  {_describe(a)}")
+
+        if a.kind == "create":
+            made = svc.events().insert(calendarId=cal_id,
+                                       body=to_gcal(month, a.day, p["ev"], p["summary"], cfg)).execute()
+            entries.append(_entry(made["id"], p["ev"], p["summary"], made.get("updated", "")))
+        elif a.kind == "update":
+            got = svc.events().update(calendarId=cal_id, eventId=p["id"],
+                                      body=to_gcal(month, a.day, p["ev"], p["summary"], cfg)).execute()
+            _replace_entry(entries, p["id"], _entry(p["id"], p["ev"], p["summary"], got.get("updated", "")))
+        elif a.kind == "delete":
+            if not p.get("gone"):
+                try:
+                    svc.events().delete(calendarId=cal_id, eventId=p["id"]).execute()
+                except Exception as e:
+                    print(f"    ! could not delete {p['id']}: {e}", file=sys.stderr)
+            saved[key] = [e for e in entries if e["id"] != p["id"]]
+        elif a.kind == "pull":
+            g = p["gcal"]
+            _replace_entry(entries, p["id"],
+                           _entry(p["id"], p["ev"], g["summary"], g["updated"]))
+        elif a.kind == "adopt":
+            g = p["gcal"]
+            entries.append({"id": g["id"], "start": g["start"], "end": g["end"],
+                            "title": gl.contract(g["summary"]), "summary": g["summary"],
+                            "updated": g["updated"]})
+        elif a.kind == "note":
+            note_updates[a.day] = p["events"]
+        elif a.kind == "conflict":
+            conflicts.append((month, a.day, p))
+
+    if note_updates:
+        write_days(month, note_updates)
+    for key in [k for k, v in saved.items() if not v]:
+        del saved[key]
+    if conflicts:
+        _log_conflicts(conflicts)
+
+
+def _entry(id, ev, summary, updated):
+    return {"id": id, "start": ev.start, "end": ev.end, "title": ev.title,
+            "summary": summary, "updated": updated}
+
+
+def _replace_entry(entries, id, new):
+    for i, e in enumerate(entries):
+        if e["id"] == id:
+            entries[i] = new
+            return
+    entries.append(new)
+
+
+
+def _log_conflicts(conflicts):
+    with open(CONFLICTS, "a", encoding="utf-8") as f:
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        for month, day, p in conflicts:
+            j, g = p["journal"], p["gcal"]
+            f.write(f"{stamp} {month}-{day:02d}\n"
+                    f"  note:     {j and N.join_events([(j.start, j.end, j.title)])}\n"
+                    f"  calendar: {g and g['summary']}\n")
+    print(f"\n  {len(conflicts)} conflict(s) left untouched -- see {CONFLICTS}\n"
+          f"  resolve by editing one side, or re-run with --prefer journal|gcal",
+          file=sys.stderr)
+
+
+# --- glossary ---------------------------------------------------------------
+
+def cmd_glossary(args):
+    data = _read_json(GLOSSARY, {})
+    gl = N.Glossary.load(data)
+    book = gl.phrases if args.phrase else gl.terms
+    label = "phrase" if args.phrase else "term"
+
+    if args.action == "list":
+        for kind, m in (("phrase", gl.phrases), ("term", gl.terms)):
+            for k, v in sorted(m.items(), key=lambda kv: kv[0].casefold()):
+                print(f"  {kind:<7} {k:<24} -> {v}")
+        if gl.known:
+            print(f"  already fine: {', '.join(sorted(gl.known))}")
+        if not gl.phrases and not gl.terms:
+            print("  (empty -- try `journal-sync suggest`)")
+        return
+    if args.action == "set":
+        if not args.value:
+            sys.exit("journal-sync: `glossary set` needs a shorthand and an expansion")
+        book[args.key] = " ".join(args.value)
+        print(f"  {label} {args.key!r} -> {book[args.key]!r}")
+    elif args.action == "rm":
+        if book.pop(args.key, None) is None:
+            sys.exit(f"journal-sync: no {label} {args.key!r}")
+        print(f"  removed {label} {args.key!r}")
+    _write_json(GLOSSARY, gl.dump())
+
+
+def _scan_unknown(gl, months):
+    """Shorthand appearing in the notes that the glossary says nothing about."""
+    seen, context = {}, {}
+    for month in months:
+        days, _, _ = read_month(month)
+        for day, events in days.items():
+            for ev in events:
+                for word in gl.unknown_terms(ev.title):
+                    seen[word.casefold()] = word
+                    context.setdefault(word.casefold(), []).append(
+                        f"{month}-{day:02d}: {N.join_events([(ev.start, ev.end, ev.title)])}")
+    return {seen[k]: v[:4] for k, v in context.items()}
+
+
+SUGGEST_PROMPT = """\
+You are helping expand shorthand from a handwritten-style bullet journal into \
+titles that read normally on a shared calendar.
+
+Below are shorthand terms with the journal lines they appear in. For each, \
+decide whether you can expand it *from evidence*, not from guessing.
+
+Rules, in order of importance:
+1. If a term is an opaque personal name, initialism or private abbreviation \
+whose meaning you cannot determine from the context given, put it in "unknown". \
+Do NOT invent a plausible meaning. A wrong expansion on a calendar is far worse \
+than no expansion. This is the most common correct answer for initialisms.
+2. If the expansion is only a matter of capitalisation or obvious spelling \
+("david" -> "David", "appt" -> "appointment"), give it with confidence "high".
+3. If the surrounding lines genuinely establish the meaning (a run of travel \
+lines making "SH" -> "Shanghai" unambiguous), give it with confidence "medium" \
+and say what in the context establishes it.
+4. Keep expansions short. They are calendar titles, not sentences.
+
+Reply with JSON only, no prose and no code fence:
+{"terms": {"<shorthand>": {"expansion": "...", "confidence": "high|medium", \
+"why": "..."}}, "unknown": ["..."]}
+
+Terms and their context:
+%s
+"""
+
+
+def cmd_suggest(args):
+    cfg = config()
+    gl = N.Glossary.load(_read_json(GLOSSARY, {}))
+    found = _scan_unknown(gl, months_window(cfg, args.month))
+    if not found:
+        print("no unexplained shorthand -- the glossary covers everything in view")
+        return
+
+    blob = "\n".join(f"- {term}\n" + "\n".join(f"    {c}" for c in ctx)
+                     for term, ctx in sorted(found.items()))
+    print(f"asking Claude about {len(found)} term(s)...", file=sys.stderr)
+    cmd = ["claude", "-p", "--output-format", "text"]
+    if cfg.get("model"):
+        cmd += ["--model", cfg["model"]]
+    try:
+        out = subprocess.run(cmd, input=SUGGEST_PROMPT % blob, capture_output=True,
+                             text=True, timeout=180)
+    except FileNotFoundError:
+        sys.exit("journal-sync: `claude` is not on PATH; add entries with "
+                 "`journal-sync glossary set` instead")
+    if out.returncode != 0:
+        sys.exit(f"journal-sync: claude failed: {out.stderr.strip()[:400]}")
+
+    try:
+        text = out.stdout.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        data = json.loads(text)
+    except (json.JSONDecodeError, IndexError):
+        sys.exit(f"journal-sync: could not read Claude's reply as JSON:\n{out.stdout[:400]}")
+
+    terms = data.get("terms", {})
+    # An expansion equal to its own shorthand is not an expansion; it just
+    # means the word already reads correctly. Compared exactly, not folded:
+    # "david" -> "David" differs only in case and is precisely the kind of
+    # expansion worth keeping, since nothing else will capitalise a name that
+    # sits in the middle of a title.
+    same = {k for k, v in terms.items()
+            if v.get("expansion", "").strip() == k.strip()}
+    terms = {k: v for k, v in terms.items() if k not in same}
+    high = {k: v for k, v in terms.items() if v.get("confidence") == "high"}
+    med = {k: v for k, v in terms.items() if v.get("confidence") != "high"}
+    for label, group in (("confident", high), ("from context", med)):
+        if group:
+            print(f"\n{label}:")
+            for k, v in sorted(group.items()):
+                why = f"   ({v['why']})" if v.get("why") and label != "confident" else ""
+                print(f"  {k:<20} -> {v['expansion']}{why}")
+    if same:
+        print(f"\nalready read correctly: {', '.join(sorted(same))}")
+    unknown = [u for u in data.get("unknown", []) if u.casefold() not in
+               {k.casefold() for k in terms}]
+    if unknown:
+        print("\nonly you know these -- define them by hand:")
+        for u in sorted(unknown):
+            print(f"  journal-sync glossary set {u!r} '...'")
+
+    if not args.apply:
+        print("\n(nothing written -- re-run with --apply to accept, "
+              "or --apply --all to include the context-derived ones)")
+        return
+    accept = dict(high)
+    if args.all:
+        accept.update(med)
+    if not accept and not same:
+        print("\nnothing confident enough to apply")
+        return
+    gl.known |= same
+    gl.terms.update({k: v["expansion"] for k, v in accept.items()})
+    _write_json(GLOSSARY, gl.dump())
+    print(f"\nwrote {len(accept)} entr(ies) and {len(same)} already-fine "
+          f"word(s) to {GLOSSARY}")
+
+
+# --- status / auth ----------------------------------------------------------
+
+def cmd_auth(args):
+    service(interactive=True)
+    print(f"authorised; token saved to {TOKEN}")
+
+
+def cmd_status(args):
+    cfg = config()
+    gl = N.Glossary.load(_read_json(GLOSSARY, {}))
+    state = _read_json(STATE, {})
+    print(f"vault      {vault_dir()}")
+    print(f"timezone   {cfg['timezone']}")
+    print(f"calendar   {cfg['calendar_name']}  "
+          f"({state.get('calendar_id') or 'not created yet'})")
+    print(f"auth       {'token present' if os.path.exists(TOKEN) else 'not authorised -- run `journal-sync auth`'}")
+    print(f"glossary   {len(gl.terms)} term(s), {len(gl.phrases)} phrase(s), "
+          f"{len(gl.known)} already-fine word(s)")
+    months = months_window(cfg, args.month)
+    print(f"months     {', '.join(months)}")
+    for month in months:
+        days, _, _ = read_month(month)
+        n = sum(len(v) for v in days.values())
+        tracked = sum(len(v) for v in state.get("months", {}).get(month, {}).values())
+        exists = "" if os.path.exists(note_path(month)) else "  (no note yet)"
+        print(f"  {month}   {n:>3} event(s) in the note, {tracked:>3} synced{exists}")
+    unknown = _scan_unknown(gl, months)
+    if unknown:
+        print(f"\n{len(unknown)} unexplained term(s): {', '.join(sorted(unknown))}")
+        print("run `journal-sync suggest` to work through them")
+
+
+# --- entry point ------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(prog="journal-sync", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("sync", help="reconcile the note and the calendar")
+    s.add_argument("-n", "--dry-run", action="store_true", help="show the plan, change nothing")
+    s.add_argument("--online", action="store_true", help="with --dry-run, still read the calendar")
+    s.add_argument("--month", metavar="YYYY-MM", help="just this month")
+    s.add_argument("--prefer", choices=("newer", "journal", "gcal"),
+                   help="which side wins when both edited the same event")
+    s.set_defaults(func=cmd_sync)
+
+    a = sub.add_parser("auth", help="authorise against Google (one time)")
+    a.set_defaults(func=cmd_auth)
+
+    t = sub.add_parser("status", help="what is configured and what is pending")
+    t.add_argument("--month", metavar="YYYY-MM")
+    t.set_defaults(func=cmd_status)
+
+    g = sub.add_parser("suggest", help="propose glossary entries for new shorthand")
+    g.add_argument("--apply", action="store_true", help="write the confident ones")
+    g.add_argument("--all", action="store_true", help="with --apply, take the context-derived ones too")
+    g.add_argument("--month", metavar="YYYY-MM")
+    g.set_defaults(func=cmd_suggest)
+
+    q = sub.add_parser("glossary", help="list / set / remove entries")
+    q.add_argument("action", choices=("list", "set", "rm"))
+    q.add_argument("key", nargs="?")
+    q.add_argument("value", nargs="*")
+    q.add_argument("--phrase", action="store_true", help="a whole-title entry, not a word")
+    q.set_defaults(func=cmd_glossary)
+
+    args = ap.parse_args()
+    if args.cmd == "glossary" and args.action != "list" and not args.key:
+        ap.error("glossary set/rm needs a shorthand")
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
+if __name__ == "__main__":
+    main()
