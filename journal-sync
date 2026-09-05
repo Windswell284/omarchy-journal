@@ -42,6 +42,14 @@ RENOTIFY_AFTER = 6 * 3600
 SCOPES = ["https://www.googleapis.com/auth/calendar.app.created"]
 CALENDAR_NAME = "Journal"
 
+# The facing page has no counterpart in a calendar, so it travels as one
+# all-day event on the 1st with the four boxes in its description, marked with
+# this private property. Marked events are kept out of the day log on the way
+# back in -- without that the carrier would be adopted as an entry on the 1st
+# and its own headings written across that day's line.
+SECTIONS_KEY = "journal_sections"
+SECTIONS_TITLE = "{month} notes"
+
 
 # --- config -----------------------------------------------------------------
 
@@ -92,6 +100,8 @@ def config():
     cfg.setdefault("months", 3)
     cfg.setdefault("prefer", "newer")
     cfg.setdefault("default_minutes", N.DEFAULT_MINUTES)
+    cfg.setdefault("sections", True)
+    cfg.setdefault("sections_title", SECTIONS_TITLE)
     return cfg
 
 
@@ -135,6 +145,20 @@ def write_days(month, updates):
         text, ok = N.replace_day(text, day, body)
         if not ok:
             print(f"  ! day {day} has no line in {month}.md; skipped", file=sys.stderr)
+    _write_note(path, text)
+
+
+def write_sections(month, sections):
+    """Rewrite the facing page, leaving the day log above it untouched."""
+    path = note_path(month)
+    try:
+        text = open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        sys.exit(f"journal-sync: no note at {path} to write back into")
+    _write_note(path, N.replace_sections(text, sections))
+
+
+def _write_note(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
@@ -307,25 +331,64 @@ def from_gcal(e, cfg):
                  "summary": (e.get("summary") or "").strip(), "updated": e.get("updated", "")}
 
 
+def to_gcal_sections(month, sections, cfg):
+    """The facing page as a Calendar API body: one all-day event on the 1st.
+
+    Transparent and without reminders, because it is a page of a notebook
+    rather than an appointment -- it should not mark you busy, and it should
+    not go off on the first of every month.
+    """
+    y, m = (int(x) for x in month.split("-"))
+    first = datetime.date(y, m, 1)
+    return {"summary": cfg["sections_title"].format(month=first.strftime("%B %Y")),
+            "description": N.serialize_sections(sections),
+            "transparency": "transparent",
+            "reminders": {"useDefault": False},
+            "start": {"date": first.isoformat()},
+            "end": {"date": (first + datetime.timedelta(days=1)).isoformat()},
+            "extendedProperties": {"private": {SECTIONS_KEY: "1"}}}
+
+
+def _is_carrier(e):
+    return SECTIONS_KEY in e.get("extendedProperties", {}).get("private", {})
+
+
+def carrier_from(e):
+    """A carrier event as {id, sections, updated}."""
+    return {"id": e["id"],
+            "sections": N.parse_sections(N.from_html(e.get("description") or "")),
+            "updated": e.get("updated", "")}
+
+
 def fetch_month(svc, cal_id, month, cfg):
-    """Every event in a month, grouped by day."""
+    """(events grouped by day, the facing page's carrier) for a month.
+
+    The carrier is separated here rather than filtered later so that every
+    reader of the day log gets it right by default. `privateExtendedProperty`
+    could match it server-side but not exclude it, and the events are already
+    in hand.
+    """
     y, m = (int(x) for x in month.split("-"))
     tz = _tzobj(cfg)
     lo = datetime.datetime(y, m, 1, tzinfo=tz)
     hi = datetime.datetime(y + (m == 12), m % 12 + 1, 1, tzinfo=tz)
-    out, token = {}, None
+    out, token, carrier = {}, None, None
     while True:
         resp = svc.events().list(calendarId=cal_id, timeMin=lo.isoformat(),
                                  timeMax=hi.isoformat(), singleEvents=True,
                                  showDeleted=False, maxResults=2500,
                                  pageToken=token).execute()
         for e in resp.get("items", []):
+            if _is_carrier(e):
+                carrier = e if carrier is None else max(
+                    carrier, e, key=lambda x: x.get("updated", ""))
+                continue
             got = from_gcal(e, cfg)
             if got:
                 out.setdefault(got[0], []).append(got[1])
         token = resp.get("nextPageToken")
         if not token:
-            return out
+            return out, carrier_from(carrier) if carrier else None
 
 
 # --- sync -------------------------------------------------------------------
@@ -356,22 +419,28 @@ def cmd_sync(args):
 
     total = 0
     for month in months_window(cfg, args.month):
-        days, _, mtime = read_month(month)
+        days, text, mtime = read_month(month)
         if not days and not os.path.exists(note_path(month)):
             continue
-        gcal = fetch_month(svc, cal_id, month, cfg) if svc and cal_id else {}
+        gcal, carrier = (fetch_month(svc, cal_id, month, cfg)
+                         if svc and cal_id else ({}, None))
         saved = {int(k): v for k, v in state.get("months", {}).get(month, {}).items()}
         actions = R.plan(days, gcal, saved, gl, prefer=args.prefer or cfg["prefer"],
                          note_mtime=mtime)
-        if not actions:
+        sections = R.plan_sections(N.parse_sections(text or ""), carrier,
+                                   state.get("sections", {}).get(month),
+                                   prefer=args.prefer or cfg["prefer"],
+                                   note_mtime=mtime) if cfg["sections"] else []
+        if not actions and not sections:
             continue
-        total += len(actions)
+        total += len(actions) + len(sections)
         print(f"{month}:")
         if args.dry_run:
-            for a in actions:
+            for a in actions + sections:
                 print(f"  {_describe(a)}")
             continue
         _apply(svc, cal_id, month, actions, state, cfg, gl)
+        _apply_sections(svc, cal_id, month, sections, state, cfg)
     if args.dry_run:
         print("(dry run -- nothing was changed)" if total else "nothing to do")
         return
@@ -382,6 +451,8 @@ def cmd_sync(args):
 
 def _describe(a):
     p = a.payload
+    if a.kind in R.SECTION_KINDS:
+        return _describe_sections(a)
     if a.kind == "note":
         body = N.join_events(p["events"])
         return f"note    {a.day:>2}: {body or '(cleared)'}"
@@ -394,6 +465,63 @@ def _describe(a):
     if a.kind == "adopt":
         return f"adopt   {a.day:>2}: {p['gcal']['summary']!r} (new on the calendar)"
     return f"CONFLICT {a.day:>2}: note {p['journal'] and p['journal'].title!r} vs calendar {p['gcal'] and p['gcal']['summary']!r}"
+
+
+def _describe_sections(a):
+    p = a.payload
+    def boxes(sections):
+        named = [t for i, t, _ in N.SECTIONS if (sections or {}).get(i, "").strip()]
+        return ", ".join(named) or "(empty)"
+    if a.kind == "sections-push":
+        return f"page   --> {boxes(p['sections'])}" + ("" if p["id"] else "  (new)")
+    if a.kind == "sections-pull":
+        return f"page   <-- {boxes(p['sections'])}  (edited on the calendar)"
+    if a.kind == "sections-adopt":
+        return f"page       {boxes(p['sections'])}  (already agreeing)"
+    return (f"CONFLICT page: note {boxes(p['journal'])} "
+            f"vs calendar {boxes(p['gcal'])}")
+
+
+def _apply_sections(svc, cal_id, month, actions, state, cfg):
+    """The facing-page half. One event, so at most one action per month."""
+    saved = state.setdefault("sections", {})
+    for a in actions:
+        p = a.payload
+        print(f"  {_describe(a)}")
+        if a.kind == "sections-push":
+            body = to_gcal_sections(month, p["sections"], cfg)
+            if p["id"]:
+                got = svc.events().update(calendarId=cal_id, eventId=p["id"],
+                                          body=body).execute()
+            else:
+                got = svc.events().insert(calendarId=cal_id, body=body).execute()
+            saved[month] = {"id": got["id"], "sections": p["sections"],
+                            "updated": got.get("updated", "")}
+        elif a.kind == "sections-pull":
+            write_sections(month, p["sections"])
+            saved[month] = {"id": p["gcal"]["id"], "sections": p["sections"],
+                            "updated": p["gcal"]["updated"]}
+        elif a.kind == "sections-adopt":
+            saved[month] = {"id": p["gcal"]["id"], "sections": p["sections"],
+                            "updated": p["gcal"]["updated"]}
+        elif a.kind == "sections-conflict":
+            _log_section_conflict(month, p)
+
+
+def _log_section_conflict(month, p):
+    with open(CONFLICTS, "a", encoding="utf-8") as f:
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        f.write(f"{stamp} {month} facing page\n")
+        for side, sections in (("note", p["journal"]), ("calendar", p["gcal"])):
+            for sid, title, _was in N.SECTIONS:
+                body = (sections or {}).get(sid, "").strip()
+                if body:
+                    lines = body.splitlines()
+                    more = " ..." if len(lines) > 1 else ""
+                    f.write(f"  {side:<9} {title}: {lines[0]}{more}\n")
+    print(f"\n  the facing page differs on both sides -- see {CONFLICTS}\n"
+          f"  resolve by editing one side, or re-run with --prefer journal|gcal",
+          file=sys.stderr)
 
 
 def _apply(svc, cal_id, month, actions, state, cfg, gl):
@@ -642,6 +770,13 @@ def cmd_status(args):
         tracked = sum(len(v) for v in state.get("months", {}).get(month, {}).values())
         exists = "" if os.path.exists(note_path(month)) else "  (no note yet)"
         print(f"  {month}   {n:>3} event(s) in the note, {tracked:>3} synced{exists}")
+        if cfg["sections"]:
+            carried = state.get("sections", {}).get(month) or {}
+            filled = sum(1 for _sid, _t, _w in N.SECTIONS
+                         if (carried.get("sections") or {}).get(_sid, "").strip())
+            print(f"           facing page: "
+                  + (f"{filled} box(es) carried" if carried.get("id")
+                     else "not on the calendar yet"))
     unknown = _scan_unknown(gl, months)
     if unknown:
         print(f"\n{len(unknown)} unexplained term(s): {', '.join(sorted(unknown))}")

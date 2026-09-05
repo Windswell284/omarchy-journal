@@ -124,6 +124,35 @@ t = open(f"{VAULT}/2026-09.md").read().replace(", 2:15 pm David", "")
 open(f"{VAULT}/2026-09.md", "w").write(t)
 run("   sync"); show_cal()
 run("10. sync again (no-op)")
+def carrier():
+    return [e for e in SVC.store.values()
+            if JS.SECTIONS_KEY in e.get("extendedProperties", {}).get("private", {})][0]
+def show_page():
+    print("    note page:", __import__("journal_notes").parse_sections(
+        open(f"{VAULT}/2026-09.md").read()))
+    print("    cal page: ", repr(carrier()["description"]))
+
+print("\n### 11. the facing page rode out with the first sync")
+show_page()
+print("\n### 12. add a Grateful line on the phone, in the event description")
+c = carrier()
+c.update(description=c["description"].replace(
+    "## Grateful for\n", "## Grateful for\n\n- the rain\n"), updated=stamp())
+run("   sync"); show_page()
+run("13. sync again (must be a no-op)")
+print("\n### 14. edit the note: another Focus line")
+t = open(f"{VAULT}/2026-09.md").read().replace("- shoulder", "- shoulder\n- sleep")
+open(f"{VAULT}/2026-09.md", "w").write(t)
+os.utime(f"{VAULT}/2026-09.md", (2e9, 2e9))     # newer than any fake event
+run("   sync"); show_page()
+run("15. sync again (no-op)")
+print("\n### 16. delete the carrier on the phone -- the boxes must survive")
+SVC.store.pop(carrier()["id"])
+run("   sync"); show_page()
+run("17. sync again (no-op)")
+print("\n### 18. the day log never sees the carrier")
+show_note()
+
 print("\n### final note ###")
 print(open(f"{VAULT}/2026-09.md").read())
 shutil.rmtree(TMP)

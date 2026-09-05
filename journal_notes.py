@@ -10,7 +10,7 @@ the bold markers are optional, and anything below the first `## ` heading is
 not a day at all.
 """
 
-import re, unicodedata
+import html, re, unicodedata
 
 DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]          # Sunday-indexed
 
@@ -254,6 +254,123 @@ def replace_day(text, day, new_text):
                 continue
         out.append(line)
     return "".join(out), done
+
+
+# --- the facing page --------------------------------------------------------
+
+# Mirrors SECTIONS in Model.js: the ids are internal, the titles are what land
+# in the note as `## ` headings, and `was` lists headings a box used to be
+# written under, so renaming one migrates its contents instead of dropping them.
+SECTIONS = [
+    ("focus",    "Focus",        ("Goals / Focus",)),
+    ("tasks",    "Tasks",        ()),
+    ("grateful", "Grateful for", ("Grateful",)),
+    ("notes",    "Notes",        ("Next Month",)),
+]
+
+BULLET_RE = re.compile(r"^\s*[-*+•]\s+")
+_BR_RE = re.compile(r"<br\s*/?>|</p\s*>|</div\s*>", re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _normalize_title(title):
+    """Model.js's normalizeTitle: spacing and slashes are not content."""
+    return re.sub(r"[\s/]+", "", str(title)).casefold()
+
+
+def section_id_for_title(title):
+    want = _normalize_title(title)
+    for sid, name, was in SECTIONS:
+        if _normalize_title(name) == want or any(_normalize_title(w) == want for w in was):
+            return sid
+    return ""
+
+
+def _trim_blank(lines):
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join(lines[start:end])
+
+
+def parse_sections(text):
+    """{id: body} for the facing page, from a note or a calendar description.
+
+    Deliberately Model.js's `parseSections`, line for line. The panel and the
+    sync read the same note, and a second reading that disagreed with the first
+    about a blank line would have the two rewriting each other's work forever.
+    Interior blanks are kept, edge ones trimmed, and the bullet marker stripped
+    -- it is punctuation the serializer puts back, not content.
+    """
+    out, current, buf = {}, "", []
+    for line in str(text or "").splitlines():
+        m = SECTION_RE.match(line)
+        if m:
+            if current:
+                out[current] = _trim_blank(buf)
+            buf, current = [], section_id_for_title(m.group(1))
+        elif current:
+            buf.append(BULLET_RE.sub("", line))
+    if current:
+        out[current] = _trim_blank(buf)
+    out.pop("", None)                   # a heading none of the boxes claims
+    return out
+
+
+def section_lines(sections):
+    """The `## ` block, exactly as Model.js's serializeMonth writes it.
+
+    Byte-for-byte the panel's own output, so a month the sync rewrote and a
+    month the panel rewrote are the same file. Every heading is written whether
+    or not anything sits under it, for the same reason every day is -- and,
+    once this travels to a phone, because a heading that is not there is a
+    heading you cannot type under.
+    """
+    lines = []
+    for sid, title, _was in SECTIONS:
+        lines += ["", "## " + title, ""]
+        body = str((sections or {}).get(sid) or "")
+        if body:
+            lines += ["" if line == "" else "- " + BULLET_RE.sub("", line)
+                      for line in body.split("\n")]
+    return lines
+
+
+def serialize_sections(sections):
+    """The same block as free-standing text, for a calendar description."""
+    return "\n".join(section_lines(sections)).lstrip("\n")
+
+
+def replace_sections(text, sections):
+    """Rewrite the facing page in a note, leaving the day log untouched.
+
+    The block is regenerated rather than patched in place -- unlike a day line,
+    which is edited where it sits. The panel already rewrites the whole block on
+    every save, so regenerating here is what keeps the two in step; patching
+    would preserve a stray heading the panel would drop on the next keystroke.
+    """
+    lines = text.splitlines()
+    cut = next((i for i, line in enumerate(lines) if SECTION_RE.match(line)), len(lines))
+    head = lines[:cut]
+    while head and not head[-1].strip():
+        head.pop()
+    return "\n".join(head + section_lines(sections)) + "\n"
+
+
+def from_html(text):
+    """A calendar description back to plain text.
+
+    A description typed on a phone comes home as typed, but one edited in the
+    Calendar web UI comes home as that editor's HTML -- `<br>` for a newline,
+    entities for punctuation. Read either way, so an edit made in a browser
+    does not arrive as one long line with tags in it.
+    """
+    text = str(text or "")
+    if "<" not in text and "&" not in text:
+        return text
+    return html.unescape(_TAG_RE.sub("", _BR_RE.sub("\n", text)))
 
 
 # --- the glossary -----------------------------------------------------------

@@ -338,13 +338,52 @@ against the event's; `journal` and `gcal` force a side. Where `newer` cannot
 tell, the event is left alone and written to
 `~/.config/omarchy/journal/conflicts.log` rather than resolved by guesswork.
 
+### The facing page
+
+**Focus**, **Tasks**, **Grateful for** and **Notes** have no counterpart in a
+calendar -- there is no event they could sensibly become. So they travel
+together, in the description of a single all-day event on the 1st of the
+month, titled `September 2026 notes`. Tap it on your phone and the four boxes
+are there, under the same `## ` headings the note uses; edit them there and
+they come home on the next sync.
+
+It is the same loop as the day log and needs nothing new to run it: no second
+service, no extra dependency, and no widening of the OAuth scope -- the carrier
+is an ordinary event on the `Journal` calendar this tool already made. The
+event is marked with a private property so it is kept out of the day log on the
+way back in, and is created transparent and without reminders: it should not
+mark you busy, and it should not go off on the first of every month.
+
+The four boxes move as one value rather than line by line, since one
+description is one field. If the note and the phone have both been edited since
+the last sync, `--prefer` decides exactly as it does for events, and an
+unresolvable clash is written to `conflicts.log` rather than guessed at.
+
+One asymmetry is deliberate. Deleting the carrier event on your phone does not
+clear the boxes -- the next sync puts it back from the note. The note is the
+record and the event only how it travels, so losing a month of Grateful to a
+stray swipe would be a poor price for symmetry with the day log. To empty a
+box, empty it.
+
+To turn the whole thing off, in `~/.config/omarchy/journal/config.json`:
+
+```json
+{ "sections": false, "sections_title": "{month} notes" }
+```
+
+`sections_title` is the carrier's title; `{month}` becomes `September 2026`.
+Existing carrier events are left alone when it is off -- and still kept out of
+the day log, so switching back and forth cannot turn one into an entry on
+the 1st.
+
 ### What is not synced
 
-Only the day log. **Focus**, **Tasks**, **Grateful** and **Notes** have no
-counterpart in a calendar and are left untouched -- so if this is replacing
-Obsidian Sync outright, those four sections stop reaching your other devices.
 Everything else in the note is preserved byte for byte: only the day lines that
-actually changed are rewritten.
+actually changed are rewritten. The facing page is regenerated rather than
+patched, byte for byte as the panel itself writes it -- which is what keeps the
+two from rewriting each other's work, and means a `## ` heading that none of
+the four boxes claims does not survive a sync, exactly as it does not survive
+the panel's next save.
 
 ## Hacking on it
 
@@ -369,6 +408,23 @@ Each step there is followed by a second sync that must do nothing. That is the
 assertion worth keeping: a sync which cannot leave the two sides agreeing will
 push its own last change back and forth forever, and testing each direction
 once will not catch it.
+
+`journal_notes.parse_sections` and `section_lines` are `Model.js`'s
+`parseSections` and the tail of `serializeMonth`, in Python, and have to stay
+byte-identical to them: the panel and the sync both rewrite the whole facing
+page, so a serializer that disagreed about one blank line would have the two
+overwriting each other on every keystroke. If you change one, change the other
+and check them against each other:
+
+```bash
+node -e 'const fs=require("fs");
+  const s=fs.readFileSync("Model.js","utf8").replace(/^\.pragma library\s*$/m,"");
+  const M={}; new Function("x", s+"\nObject.assign(x,{serializeMonth})")(M);
+  const o=M.serializeMonth(2026,8,{},{focus:"a\nb",notes:"c"});
+  process.stdout.write(o.slice(o.indexOf("\n## ")))' > /tmp/js.txt
+python3 -c 'import journal_notes as N,sys
+sys.stdout.write("\n".join(N.section_lines({"focus":"a\nb","notes":"c"}))+"\n")' | diff - /tmp/js.txt && echo same
+```
 
 `Model.js` is plain JavaScript with one QML-only line at the top, so it can be
 exercised directly:

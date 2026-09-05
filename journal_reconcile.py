@@ -151,3 +151,62 @@ def _resolve(prefer, s, g, note_mtime):
     if g is None or note_mtime is None or not g.get("updated"):
         return "conflict"
     return "journal" if note_mtime > g["updated"] else "gcal"
+
+
+# --- the facing page --------------------------------------------------------
+#
+# Focus, Tasks, Grateful and Notes have no counterpart in a calendar, so they
+# ride together in the description of one all-day event on the 1st. That makes
+# them a single value rather than a list to match up: there is no per-line
+# pairing to get wrong, and no question about which box moved -- the block
+# either agrees with what the two sides last agreed on, or it does not.
+
+SECTION_KINDS = ("sections-push", "sections-pull", "sections-adopt", "sections-conflict")
+
+
+def _norm(sections):
+    """Drop empty boxes, so an absent one and a blank one compare equal."""
+    return {k: v for k, v in (sections or {}).items() if v and v.strip()}
+
+
+def plan_sections(note, gcal, state, prefer="newer", note_mtime=None):
+    """Actions for one month's facing page.
+
+    note   {id: body}                    the note as it stands
+    gcal   {id, sections, updated}|None  the carrier event, if there is one
+    state  {id, sections, updated}|None  what the two agreed at the last sync
+    """
+    n = _norm(note)
+    known = bool(state and gcal and state.get("id") == gcal["id"])
+    s = _norm(state["sections"]) if known else None
+
+    if gcal is None:
+        # No carrier. A deleted one is remade from the note rather than read as
+        # an instruction to clear the boxes: the note is the record and the
+        # event only how it travels, so losing a month's Grateful to a stray
+        # swipe on a phone would be a poor price for symmetry with the day log.
+        return [Action("sections-push", None, {"sections": n, "id": None})] if n else []
+
+    g = _norm(gcal["sections"])
+    if g == n:
+        return [] if known and s == n else [
+            Action("sections-adopt", None, {"sections": n, "gcal": gcal})]
+
+    if s is None:
+        # A carrier we have never seen: nothing says which side moved. An empty
+        # block is also what a carrier looks like before anyone has typed in
+        # it, so it never wins -- only a real disagreement is arbitrated.
+        if not g:
+            return [Action("sections-push", None, {"sections": n, "id": gcal["id"]})]
+        if not n:
+            return [Action("sections-pull", None, {"sections": g, "gcal": gcal})]
+
+    jc, gc = n != s, g != s
+    if jc and gc:
+        winner = _resolve(prefer, state or {}, gcal, note_mtime)
+        if winner == "conflict":
+            return [Action("sections-conflict", None, {"journal": n, "gcal": g})]
+        jc = winner == "journal"
+    if jc:
+        return [Action("sections-push", None, {"sections": n, "id": gcal["id"]})]
+    return [Action("sections-pull", None, {"sections": g, "gcal": gcal})]
