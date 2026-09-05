@@ -372,6 +372,32 @@ Panel {
     printProc.running = true
   }
 
+  // ---- Sync now. The timer only pulls hourly, so this is the answer to "I
+  //      have just changed it on the phone" without waiting out the hour.
+  property bool syncing: false
+  property var syncedAt: null
+
+  // Through the unit rather than by running journal-sync directly: systemd
+  // will not run one unit twice at once, and that is the only thing keeping
+  // this button from racing the hourly timer or the .path unit over
+  // state.json. `start` on a Type=oneshot waits for the run to finish.
+  function syncNow() {
+    if (root.syncing) return
+    root.syncing = true
+    syncProc.running = true
+  }
+
+  // What the footer says. `clock` ticks once a minute, and reading it here is
+  // what re-runs this binding as the answer goes stale.
+  readonly property string syncLabel: {
+    if (root.syncing) return "syncing\u2026"
+    if (!root.syncedAt) return ""
+    var mins = Math.floor((clock.date.getTime() - root.syncedAt.getTime()) / 60000)
+    if (mins < 1) return "synced just now"
+    if (mins < 60) return "synced " + mins + "m ago"
+    return "synced " + Math.floor(mins / 60) + "h ago"
+  }
+
   function stopSectionEditing() {
     root.editingSection = false
     keyCatcher.forceActiveFocus()
@@ -414,7 +440,11 @@ Panel {
     else root.open()
   }
 
-  onOpenedChanged: if (!root.opened) {
+  onOpenedChanged: {
+    if (root.opened) {
+      syncedAtProc.running = true
+      return
+    }
     root.flush()
     root.editing = false
     root.editingSection = false
@@ -477,6 +507,36 @@ Panel {
     id: mkdirProc
     running: false
     command: ["mkdir", "-p", root.journalDir]
+  }
+
+  Process {
+    id: syncProc
+    running: false
+    command: ["systemctl", "--user", "start", "journal-sync.service"]
+    onExited: {
+      root.syncing = false
+      syncButton.rotation = 0
+      syncedAtProc.running = true
+    }
+  }
+
+  // When the service last finished, whoever started it -- this button, the
+  // timer, or the note being written. Asked for on open and after a sync
+  // rather than polled: nothing else moves it. Through `date` because the
+  // stamp systemd prints carries a zone abbreviation Date() will not parse.
+  Process {
+    id: syncedAtProc
+    running: false
+    command: ["bash", "-c",
+      "t=$(systemctl --user show journal-sync.service -p ExecMainExitTimestamp --value)"
+      + " && [ -n \"$t\" ] && date -d \"$t\" +%s"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var secs = parseInt(text.trim(), 10)
+        root.syncedAt = isNaN(secs) ? null : new Date(secs * 1000)
+      }
+    }
   }
 
   SystemClock {
@@ -645,6 +705,7 @@ Panel {
         else if (t === "t" || t === "T") root.goToToday()
         else if (t >= "1" && t <= "4") root.focusSection(parseInt(t, 10) - 1)
         else if (t === "p" || t === "P") root.printMonth()
+        else if (t === "s" || t === "S") root.syncNow()
       }
 
       // ---- Heading: the month at the top of the view, with the two chevrons
@@ -715,6 +776,40 @@ Panel {
               cursorShape: Qt.PointingHandCursor
               onClicked: root.moveMonth(1)
             }
+          }
+        }
+
+        // Apart from the chevrons deliberately: those move the view, this
+        // one talks to Google, and sitting it in the same row would invite it
+        // to be read as a third way to turn the page.
+        Text {
+          id: syncButton
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: -root.headerBias
+          text: "󰑐"
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.icon
+          color: syncMouse.containsMouse ? Style.hoverStateColor(root.fg, Color.accent)
+                                         : root.mutedColor
+          opacity: root.syncing ? 0.7 : 1
+
+          RotationAnimation on rotation {
+            running: root.syncing
+            from: 0
+            to: 360
+            duration: 1200
+            loops: Animation.Infinite
+          }
+
+          MouseArea {
+            id: syncMouse
+            anchors.fill: parent
+            anchors.margins: -Style.space(6)
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.syncNow()
           }
         }
 
@@ -1162,7 +1257,8 @@ Panel {
           anchors.rightMargin: Style.space(16)
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
-          text: root.noteName
+          text: root.syncLabel === "" ? root.noteName
+                                      : root.noteName + "     " + root.syncLabel
           elide: Text.ElideRight
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -1177,7 +1273,7 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
           anchors.verticalCenterOffset: root.footerBias
           text: (root.editing || root.editingSection) ? "esc  done"
-            : "←→  month     ↵  write     1-4  boxes     p  print     t  today"
+            : "←→  month     ↵  write     1-4  boxes     p  print     s  sync     t  today"
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.mutedColor

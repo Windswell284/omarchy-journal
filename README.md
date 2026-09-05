@@ -86,9 +86,12 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
 | `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Grateful, Notes, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
+| `s` | Sync with Google Calendar now |
 
 The wheel scrolls the days continuously. Clicking the month name returns to
-today; the chevrons either side of it step a month at a time.
+today; the chevrons either side of it step a month at a time. The circular
+arrow at the right of the heading syncs on the spot, and the footer says how
+long ago the last sync was, whoever started it.
 
 The heading names the month you are in: the one under the middle of the view
 while you scroll, and the one the cursor is on the moment a key moves it, so
@@ -263,11 +266,21 @@ systemctl --user daemon-reload
 systemctl --user enable --now journal-sync.timer journal-sync.path
 ```
 
-The timer is the one that matters: an edit made on your phone touches nothing
-on this machine, so only the clock notices it. The path unit is a latency
-shortcut for the other direction, firing as soon as the note is written so a
-line typed in the bar reaches the phone without waiting. **It has the default
-vault path baked in** -- if yours is elsewhere, edit `PathChanged=` to match.
+Both triggers run the same service, and every run reconciles in both
+directions -- what is scheduled is the occasion, not the direction.
+
+The path unit covers the note-to-calendar half with no delay at all, firing as
+soon as the note is written, so a line typed in the bar is on the phone by the
+time you look. **It has the default vault path baked in** -- if yours is
+elsewhere, edit `PathChanged=` to match.
+
+The timer covers the other half, which nothing local can notice: an edit made
+on the phone touches this machine only when we go and look. Hourly, because
+`Persistent=true` means every resume from sleep is also a sync -- a laptop that
+suspends between sittings is up to date whenever it is open -- and the panel's
+sync button covers the times you know there is something waiting. Shorten
+`OnCalendar=` if you would rather not think about it; the run costs about a
+second and three API calls, so even every five minutes is nothing.
 
 ### When both sides changed
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync the journal every few minutes
+Description=Sync the journal hourly, and on every resume
 Documentation=https://github.com/Windswell284/omarchy-journal
 
 [Timer]
@@ -7,9 +7,13 @@ Documentation=https://github.com/Windswell284/omarchy-journal
 # so only the clock can notice it. A wall-clock schedule rather than
 # OnUnitActiveSec=, which has no anchor after a logout and leaves the timer
 # elapsed with nothing scheduled until the note next changes.
-OnCalendar=*:0/5
+#
+# Hourly rather than every few minutes because Persistent= turns every resume
+# from sleep into a sync anyway, and the panel has a button for the times you
+# know you just changed something on the phone.
+OnCalendar=hourly
 Persistent=true
-RandomizedDelaySec=15
+RandomizedDelaySec=2min
 
 [Install]
 WantedBy=timers.target
