@@ -131,7 +131,7 @@ def write_days(month, updates):
     except FileNotFoundError:
         sys.exit(f"journal-sync: no note at {path} to write back into")
     for day, events in sorted(updates.items()):
-        body = N.join_events([(e.start, e.end, e.title) for e in events])
+        body = N.join_events(events)
         text, ok = N.replace_day(text, day, body)
         if not ok:
             print(f"  ! day {day} has no line in {month}.md; skipped", file=sys.stderr)
@@ -271,8 +271,7 @@ def to_gcal(month, day, ev, summary, cfg):
     y, m = (int(x) for x in month.split("-"))
     date = datetime.date(y, m, day)
     body = {"summary": summary,
-            "extendedProperties": {"private": {"journal": N.join_events(
-                [(ev.start, ev.end, ev.title)])}}}
+            "extendedProperties": {"private": {"journal": N.join_events([ev])}}}
     if ev.start is None:
         body["start"] = {"date": date.isoformat()}
         body["end"] = {"date": (date + datetime.timedelta(days=1)).isoformat()}
@@ -384,7 +383,7 @@ def cmd_sync(args):
 def _describe(a):
     p = a.payload
     if a.kind == "note":
-        body = N.join_events([(e.start, e.end, e.title) for e in p["events"]])
+        body = N.join_events(p["events"])
         return f"note    {a.day:>2}: {body or '(cleared)'}"
     if a.kind in ("create", "update"):
         return f"{a.kind:<7} {a.day:>2}: {p['summary']!r}"
@@ -465,7 +464,7 @@ def _log_conflicts(conflicts):
         for month, day, p in conflicts:
             j, g = p["journal"], p["gcal"]
             f.write(f"{stamp} {month}-{day:02d}\n"
-                    f"  note:     {j and N.join_events([(j.start, j.end, j.title)])}\n"
+                    f"  note:     {j and N.join_events([j])}\n"
                     f"  calendar: {g and g['summary']}\n")
     print(f"\n  {len(conflicts)} conflict(s) left untouched -- see {CONFLICTS}\n"
           f"  resolve by editing one side, or re-run with --prefer journal|gcal",
@@ -511,7 +510,7 @@ def _scan_unknown(gl, months):
                 for word in gl.unknown_terms(ev.title):
                     seen[word.casefold()] = word
                     context.setdefault(word.casefold(), []).append(
-                        f"{month}-{day:02d}: {N.join_events([(ev.start, ev.end, ev.title)])}")
+                        f"{month}-{day:02d}: {N.join_events([ev])}")
     return {seen[k]: v[:4] for k, v in context.items()}
 
 

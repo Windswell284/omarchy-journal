@@ -28,6 +28,9 @@ TIME_RE = re.compile(_T, re.I)
 LEAD_RE = re.compile(r"^\s*" + _T + r"\s*(?:[-‒-―]\s*" + _T + r")?\s*", re.I)
 TAIL_RE = re.compile(r"(?<!\w)" + _T + r"\s*(?:[-‒-―]\s*" + _T + r")?\s*$", re.I)
 DEFAULT_MINUTES = 60
+# An entry with no time of its own is a block, not an appointment: shorter, so
+# several in a row still fit inside an evening.
+INFERRED_MINUTES = 30
 
 
 # --- times ------------------------------------------------------------------
@@ -122,13 +125,13 @@ def _follows(event):
     """When an entry with no time of its own starts: as the one before ended.
 
     None where there is nothing to follow -- the entry before was itself
-    all-day, or the hour after it falls past midnight and so out of this day.
+    all-day, or its own block would not fit inside the day.
     """
-    start, end, _ = event
+    start, end = event[0], event[1]
     if start is None:
         return None
     after = end if end is not None else start + DEFAULT_MINUTES
-    return after if after < 24 * 60 else None
+    return after if after + INFERRED_MINUTES <= 24 * 60 else None
 
 
 def split_events(text):
@@ -139,6 +142,11 @@ def split_events(text):
     finished, so "5:30 pm dinner, Salvation" puts Salvation at 6:30. A
     timeless entry with no timed entry before it stays all-day: there is
     nothing for it to follow.
+
+    The inferred time is not written back into the note -- the entry stays
+    timeless there and is placed again on every read, so putting something
+    new in front of it moves it along rather than leaving it stranded at an
+    hour it never asked for.
 
     The cost is that a title can no longer hold a comma -- "dinner with Bob,
     Sue" is two entries now. safe_title() is the other half of that.
@@ -158,9 +166,13 @@ def split_events(text):
                                 # disagreeing about an event neither changed
         if not title:
             continue
+        inferred = False
         if start is None and out:
             start = _follows(out[-1])
-        out.append((start, end, title))
+            if start is not None:
+                end = start + INFERRED_MINUTES
+                inferred = True
+        out.append((start, end, title, inferred))
     return out
 
 
@@ -176,11 +188,16 @@ def safe_title(title):
 
 
 def join_events(events):
-    """Render events back as one day's text -- the inverse of split_events."""
+    """Render events back as one day's text -- the inverse of split_events.
+
+    An entry whose time was inferred is written without one, so the next read
+    places it again from wherever it now sits in the line.
+    """
     bits = []
-    for start, end, title in events:
+    for ev in events:
+        start, end, title = ev[0], ev[1], ev[2]
         title = safe_title(title)
-        if start is None:
+        if start is None or (len(ev) > 3 and ev[3]):
             bits.append(title)
         elif end is None:
             bits.append(f"{fmt_time(start)} {title}")

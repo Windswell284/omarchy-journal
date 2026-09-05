@@ -12,7 +12,10 @@ a side that has moved away from the agreed value is the side that changed.
 
 from collections import namedtuple
 
-Ev = namedtuple("Ev", "start end title")            # a journal event, shorthand
+Ev = namedtuple("Ev", "start end title inferred", defaults=(False,))
+# `inferred` marks a time this tool worked out rather than one you wrote, so
+# the note can be given it back unwritten. It is deliberately outside _key:
+# where an event sits is what matters, not who decided it.
 Action = namedtuple("Action", "kind day payload")   # payload varies by kind
 
 # kinds: create / update / delete act on the calendar,

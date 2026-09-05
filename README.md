@@ -198,14 +198,24 @@ A comma separates entries, always:
 | --- | --- |
 | `1 pm A, 2 pm B` | two events |
 | `Salvation` | one all-day event |
-| `5:30 pm dinner, Salvation` | dinner at 17:30, Salvation at 18:30 |
+| `5:30 pm dinner, Salvation` | dinner at 17:30, Salvation 18:30-19:00 |
 | `Salvation, 5 pm Dad` | Salvation all day, Dad at 17:00 |
 
 An entry with no time of its own is **all-day only where it opens the line**.
-Anywhere else it starts where the entry before it finished, so `Salvation`
-after a 5:30 pm dinner lands at 6:30 and the note is rewritten to say so. If
-the entry before it was itself all-day, or the hour after it would fall past
-midnight, there is nothing to follow and it stays all-day.
+Anywhere else it starts where the entry before it finished and runs for half an
+hour -- a block rather than an appointment, so several in a row still fit in an
+evening. If the entry before it was all-day too, or its block would not fit
+inside the day, there is nothing to follow and it stays all-day.
+
+The time it is given is **not written back into the note**. The entry stays
+timeless there and is placed again on every read, so putting something new in
+front of it moves it along instead of stranding it at an hour you never asked
+for:
+
+```
+5:30 pm dinner, Salvation                 Salvation 18:30-19:00
+5:30 pm dinner, 7 pm movie, Salvation     Salvation 20:00-20:30
+```
 
 Because every comma separates, **a title cannot contain one**. A calendar event
 called `Dinner, 7 pm at the club` is written into the note as
