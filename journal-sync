@@ -15,7 +15,7 @@ Only a calendar this tool created is ever touched -- the OAuth scope is
 `calendar.app.created`, which cannot see your primary calendar at all.
 """
 
-import argparse, datetime, json, os, subprocess, sys, zoneinfo
+import argparse, calendar, datetime, json, os, subprocess, sys, zoneinfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import journal_notes as N
@@ -43,12 +43,31 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.app.created"]
 CALENDAR_NAME = "Journal"
 
 # The facing page has no counterpart in a calendar, so it travels as one
-# all-day event on the 1st with the four boxes in its description, marked with
-# this private property. Marked events are kept out of the day log on the way
-# back in -- without that the carrier would be adopted as an entry on the 1st
-# and its own headings written across that day's line.
+# all-day event, marked with this private property. Marked events are kept
+# out of the day log on the way back in -- without that the carrier would be
+# adopted as an entry on whatever day it sits on and its own headings written
+# across that day's line.
+#
+# Which day it sits on tracks where the day log itself is: the current month
+# carries it on today's date, a month already finished leaves it parked on
+# the last day it reached, and a month not yet begun keeps it on the 1st, as
+# a page waiting its turn.
 SECTIONS_KEY = "journal_sections"
 SECTIONS_TITLE = "{month} notes"
+
+
+def _carrier_date(month):
+    """The day of `month` the facing-page event belongs on today."""
+    y, m = (int(x) for x in month.split("-"))
+    today = datetime.date.today()
+    last = calendar.monthrange(y, m)[1]
+    if (y, m) < (today.year, today.month):
+        day = last
+    elif (y, m) > (today.year, today.month):
+        day = 1
+    else:
+        day = min(today.day, last)
+    return datetime.date(y, m, day)
 
 
 # --- config -----------------------------------------------------------------
@@ -94,6 +113,13 @@ def vault_dir():
 
 
 def config():
+    """config.json with the defaults filled in.
+
+    `timezone` is the zone events are stamped with on the calendar -- by
+    default the machine's, wherever it happens to be. A time in the note is
+    a wall clock, not an instant: `1 pm lunch` is 1 pm on that date whatever
+    zone the laptop is in, and `rezone` moves the stamps along with it.
+    """
     cfg = _read_json(CONFIG, {})
     cfg.setdefault("timezone", _local_tz())
     cfg.setdefault("calendar_name", CALENDAR_NAME)
@@ -309,43 +335,72 @@ def to_gcal(month, day, ev, summary, cfg):
     return body
 
 
-def from_gcal(e, cfg):
-    """A Calendar API event as (day, normalised dict), or None if unusable."""
+def _wall(iso, zone):
+    """The wall clock an API dateTime shows in `zone` -- naive, on purpose."""
+    dt = datetime.datetime.fromisoformat(iso)
+    if zone:
+        try:
+            dt = dt.astimezone(zoneinfo.ZoneInfo(zone))
+        except Exception:
+            pass
+    return dt.replace(tzinfo=None)
+
+
+def from_gcal(e, cfg, month=None):
+    """A Calendar API event as (day, normalised dict), or None if unusable.
+
+    Times are read off the wall clock of the event's own zone, never
+    converted into another: 13:00 Asia/Shanghai and 13:00 America/Los_Angeles
+    are both `1 pm` in the note. That is what keeps `1 pm lunch` at 1 pm
+    wherever the laptop is, and what lets `rezone` restamp events without the
+    note noticing. An event stamped with no zone is read in the zone the
+    fetch asked for. One outside `month` by its own clock is None: the fetch
+    window is padded a day each way so no zone can push the 1st or the 31st
+    over the edge, and the padding is trimmed here.
+
+    `wall` carries the start and end as the event itself would write them,
+    for `rezone`; `zone` is the stamp it carries, or None for none.
+    """
     s, en = e.get("start", {}), e.get("end", {})
     if "date" in s:
-        day = datetime.date.fromisoformat(s["date"]).day
-        start = end = None
+        sd = datetime.date.fromisoformat(s["date"])
+        start = end = wall = zone = None
     elif "dateTime" in s:
-        tz = _tzobj(cfg)
-        sd = datetime.datetime.fromisoformat(s["dateTime"]).astimezone(tz)
-        day, start = sd.day, sd.hour * 60 + sd.minute
-        end = None
-        if "dateTime" in en:
-            ed = datetime.datetime.fromisoformat(en["dateTime"]).astimezone(tz)
+        zone = s.get("timeZone")
+        sd = _wall(s["dateTime"], zone or cfg["timezone"])
+        start, end = sd.hour * 60 + sd.minute, None
+        ed = (_wall(en["dateTime"], en.get("timeZone") or zone or cfg["timezone"])
+              if "dateTime" in en else None)
+        if ed is not None:
             mins = ed.hour * 60 + ed.minute
             if ed.date() == sd.date() and mins != start + cfg["default_minutes"]:
                 end = mins
+        wall = (sd.isoformat(), ed.isoformat() if ed else None)
     else:
         return None
-    return day, {"id": e["id"], "start": start, "end": end,
-                 "summary": (e.get("summary") or "").strip(), "updated": e.get("updated", "")}
+    if month and sd.strftime("%Y-%m") != month:
+        return None
+    return sd.day, {"id": e["id"], "start": start, "end": end, "zone": zone, "wall": wall,
+                    "summary": (e.get("summary") or "").strip(), "updated": e.get("updated", "")}
 
 
 def to_gcal_sections(month, sections, cfg):
-    """The facing page as a Calendar API body: one all-day event on the 1st.
+    """The facing page as a Calendar API body: one all-day event on the day
+    `_carrier_date` says it belongs on.
 
     Transparent and without reminders, because it is a page of a notebook
     rather than an appointment -- it should not mark you busy, and it should
-    not go off on the first of every month.
+    not go off as the day it sits on comes around.
     """
     y, m = (int(x) for x in month.split("-"))
+    on = _carrier_date(month)
     first = datetime.date(y, m, 1)
     return {"summary": cfg["sections_title"].format(month=first.strftime("%B %Y")),
             "description": N.serialize_sections(sections),
             "transparency": "transparent",
             "reminders": {"useDefault": False},
-            "start": {"date": first.isoformat()},
-            "end": {"date": (first + datetime.timedelta(days=1)).isoformat()},
+            "start": {"date": on.isoformat()},
+            "end": {"date": (on + datetime.timedelta(days=1)).isoformat()},
             "extendedProperties": {"private": {SECTIONS_KEY: "1"}}}
 
 
@@ -354,10 +409,11 @@ def _is_carrier(e):
 
 
 def carrier_from(e):
-    """A carrier event as {id, sections, updated}."""
+    """A carrier event as {id, sections, updated, start}."""
     return {"id": e["id"],
             "sections": N.parse_sections(N.from_html(e.get("description") or "")),
-            "updated": e.get("updated", "")}
+            "updated": e.get("updated", ""),
+            "start": e.get("start", {}).get("date", "")}
 
 
 def fetch_month(svc, cal_id, month, cfg):
@@ -369,26 +425,63 @@ def fetch_month(svc, cal_id, month, cfg):
     in hand.
     """
     y, m = (int(x) for x in month.split("-"))
-    tz = _tzobj(cfg)
-    lo = datetime.datetime(y, m, 1, tzinfo=tz)
-    hi = datetime.datetime(y + (m == 12), m % 12 + 1, 1, tzinfo=tz)
+    tz, pad = _tzobj(cfg), datetime.timedelta(days=1)
+    lo = datetime.datetime(y, m, 1, tzinfo=tz) - pad
+    hi = datetime.datetime(y + (m == 12), m % 12 + 1, 1, tzinfo=tz) + pad
     out, token, carrier = {}, None, None
     while True:
         resp = svc.events().list(calendarId=cal_id, timeMin=lo.isoformat(),
-                                 timeMax=hi.isoformat(), singleEvents=True,
-                                 showDeleted=False, maxResults=2500,
-                                 pageToken=token).execute()
+                                 timeMax=hi.isoformat(), timeZone=cfg["timezone"],
+                                 singleEvents=True, showDeleted=False,
+                                 maxResults=2500, pageToken=token).execute()
         for e in resp.get("items", []):
             if _is_carrier(e):
-                carrier = e if carrier is None else max(
-                    carrier, e, key=lambda x: x.get("updated", ""))
+                if e.get("start", {}).get("date", "")[:7] == month:
+                    carrier = e if carrier is None else max(
+                        carrier, e, key=lambda x: x.get("updated", ""))
                 continue
-            got = from_gcal(e, cfg)
+            got = from_gcal(e, cfg, month)
             if got:
                 out.setdefault(got[0], []).append(got[1])
         token = resp.get("nextPageToken")
         if not token:
             return out, carrier_from(carrier) if carrier else None
+
+
+def stale_zone(gcal, cfg):
+    """Timed events not stamped with the zone in use."""
+    return [g for evs in gcal.values() for g in evs
+            if g["wall"] and g["zone"] != cfg["timezone"]]
+
+
+def rezone(svc, cal_id, stale, saved, cfg, skip):
+    """Restamp events into the zone in use, wall clock unchanged.
+
+    Google has no floating times: a timed event is fixed to a zone, and the
+    phone shows it converted to wherever the phone is, so a `1 pm lunch`
+    stamped in Los Angeles reads 4 am in Beijing. The nearest thing to a
+    floating time is a stamp that travels: when the zone here is not the one
+    on the event, the event is rewritten as the same wall clock in the new
+    zone. The note never sees it -- `from_gcal` reads wall clocks -- and the
+    remembered timestamp is refreshed so the restamp cannot pass for an edit
+    made on the phone. `skip` holds ids this run already rewrote or removed.
+    """
+    zone, tz = cfg["timezone"], _tzobj(cfg)
+    for g in stale:
+        if g["id"] in skip:
+            continue
+        body = {k: {"dateTime": datetime.datetime.fromisoformat(iso).replace(tzinfo=tz).isoformat(),
+                    "timeZone": zone}
+                for k, iso in zip(("start", "end"), g["wall"]) if iso}
+        try:
+            got = svc.events().patch(calendarId=cal_id, eventId=g["id"], body=body).execute()
+        except Exception as e:
+            print(f"    ! could not rezone {g['id']}: {e}", file=sys.stderr)
+            continue
+        for entries in saved.values():
+            for e in entries:
+                if e["id"] == g["id"]:
+                    e["updated"] = got.get("updated", e["updated"])
 
 
 # --- sync -------------------------------------------------------------------
@@ -431,16 +524,24 @@ def cmd_sync(args):
                                    state.get("sections", {}).get(month),
                                    prefer=args.prefer or cfg["prefer"],
                                    note_mtime=mtime) if cfg["sections"] else []
-        if not actions and not sections:
+        if cfg["sections"]:
+            sections = _track_carrier_date(month, sections, carrier)
+        stale = stale_zone(gcal, cfg)
+        if not actions and not sections and not stale:
             continue
-        total += len(actions) + len(sections)
+        total += len(actions) + len(sections) + len(stale)
         print(f"{month}:")
         if args.dry_run:
             for a in actions + sections:
                 print(f"  {_describe(a)}")
-            continue
-        _apply(svc, cal_id, month, actions, state, cfg, gl)
-        _apply_sections(svc, cal_id, month, sections, state, cfg)
+        else:
+            _apply(svc, cal_id, month, actions, state, cfg, gl)
+            _apply_sections(svc, cal_id, month, sections, state, cfg)
+        if stale:
+            print(f"  rezone  {len(stale)} event(s) to {cfg['timezone']}, same wall clock")
+            if not args.dry_run:
+                rezone(svc, cal_id, stale, state["months"].setdefault(month, {}), cfg,
+                       skip={a.payload["id"] for a in actions if a.kind in ("update", "delete")})
     if args.dry_run:
         print("(dry run -- nothing was changed)" if total else "nothing to do")
         return
@@ -480,6 +581,23 @@ def _describe_sections(a):
         return f"page       {boxes(p['sections'])}  (already agreeing)"
     return (f"CONFLICT page: note {boxes(p['journal'])} "
             f"vs calendar {boxes(p['gcal'])}")
+
+
+def _track_carrier_date(month, sections, carrier):
+    """Nudge the carrier onto today's date even on a day its content agrees.
+
+    `plan_sections` only reasons about the four boxes' text, so a day with
+    nothing new to say would otherwise leave the event parked wherever it
+    last had content to push -- the date would fall behind the day log by
+    however long the facing page goes untouched. A real disagreement already
+    being settled this run (push, pull, conflict) carries the right date
+    along with it via `to_gcal_sections`, so only a quiet day needs this.
+    """
+    if carrier is None or carrier.get("start") == _carrier_date(month).isoformat():
+        return sections
+    if any(a.kind in ("sections-push", "sections-pull", "sections-conflict") for a in sections):
+        return sections
+    return [R.Action("sections-push", None, {"sections": carrier["sections"], "id": carrier["id"]})]
 
 
 def _apply_sections(svc, cal_id, month, actions, state, cfg):
@@ -755,8 +873,9 @@ def cmd_status(args):
     cfg = config()
     gl = N.Glossary.load(_read_json(GLOSSARY, {}))
     state = _read_json(STATE, {})
+    zone_from = "config.json" if "timezone" in _read_json(CONFIG, {}) else "this machine's"
     print(f"vault      {vault_dir()}")
-    print(f"timezone   {cfg['timezone']}")
+    print(f"timezone   {cfg['timezone']}  ({zone_from}; events are restamped to follow it)")
     print(f"calendar   {cfg['calendar_name']}  "
           f"({state.get('calendar_id') or 'not created yet'})")
     print(f"auth       {'token present' if os.path.exists(TOKEN) else 'not authorised -- run `journal-sync auth`'}")
