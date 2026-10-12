@@ -184,6 +184,17 @@ def write_sections(month, sections):
     _write_note(path, N.replace_sections(text, sections))
 
 
+def blank_note(month):
+    """An empty month in the layout the panel writes (Model.js serializeMonth)."""
+    y, m = (int(x) for x in month.split("-"))
+    lines = [f"# {datetime.date(y, m, 1):%B %Y}", ""]
+    for day in range(1, calendar.monthrange(y, m)[1] + 1):
+        lines.append(f"- **{day} {'MTWTFSS'[datetime.date(y, m, day).weekday()]}**")
+    for sid, name, _ in N.SECTIONS:
+        lines += ["", f"## {name}", ""]
+    return "\n".join(lines) + "\n"
+
+
 def _write_note(path, text):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -513,10 +524,17 @@ def cmd_sync(args):
     total = 0
     for month in months_window(cfg, args.month):
         days, text, mtime = read_month(month)
-        if not days and not os.path.exists(note_path(month)):
-            continue
         gcal, carrier = (fetch_month(svc, cal_id, month, cfg)
                          if svc and cal_id else ({}, None))
+        if not days and not os.path.exists(note_path(month)):
+            # No note yet for a month ahead, but something was put on the
+            # calendar for it: start the note so the event has a line to land on.
+            if not gcal:
+                continue
+            text = blank_note(month)
+            if not args.dry_run:
+                _write_note(note_path(month), text)
+                days, text, mtime = read_month(month)
         saved = {int(k): v for k, v in state.get("months", {}).get(month, {}).items()}
         actions = R.plan(days, gcal, saved, gl, prefer=args.prefer or cfg["prefer"],
                          note_mtime=mtime)
