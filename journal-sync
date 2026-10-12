@@ -589,7 +589,8 @@ def _describe(a):
 def _describe_sections(a):
     p = a.payload
     def boxes(sections):
-        named = [t for i, t, _ in N.SECTIONS if (sections or {}).get(i, "").strip()]
+        named = [N.section_title(sections, i) for i, _t, _ in N.SECTIONS
+                 if (sections or {}).get(i, "").strip()]
         return ", ".join(named) or "(empty)"
     if a.kind == "sections-push":
         return f"page   --> {boxes(p['sections'])}" + ("" if p["id"] else "  (new)")
@@ -649,11 +650,12 @@ def _log_section_conflict(month, p):
         stamp = datetime.datetime.now().isoformat(timespec="seconds")
         f.write(f"{stamp} {month} facing page\n")
         for side, sections in (("note", p["journal"]), ("calendar", p["gcal"])):
-            for sid, title, _was in N.SECTIONS:
+            for sid, _title, _was in N.SECTIONS:
                 body = (sections or {}).get(sid, "").strip()
                 if body:
                     lines = body.splitlines()
                     more = " ..." if len(lines) > 1 else ""
+                    title = N.section_title(sections, sid)
                     f.write(f"  {side:<9} {title}: {lines[0]}{more}\n")
     print(f"\n  the facing page differs on both sides -- see {CONFLICTS}\n"
           f"  resolve by editing one side, or re-run with --prefer journal|gcal",

@@ -84,7 +84,7 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `{` / `}` | Previous / next year |
 | `1` `2` `3` `4` | Jump into a facing-page box |
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
-| `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Grateful, Notes, wrapping |
+| `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Fitness, Notes, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
 | `s` | Sync with Google Calendar now |
 
@@ -126,10 +126,22 @@ o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
 ## The facing page
 
 A monthly spread is two pages. The right one holds four boxes for the month as
-a whole -- Focus and Tasks on the taller top row, Grateful and Notes
+a whole -- Focus and Tasks on the taller top row, Fitness and Notes
 beneath. Both pages are up whenever the panel is: the spread is the unit, and
 there is no one-page state to fold back to. The boxes follow whichever month
 the heading names.
+
+Those are the boxes' own names, and what a new month starts with. A month can
+call a box something else: click the title in the panel and type, or change
+the `## ` heading in Obsidian. The name is kept in the note as the heading,
+travels to the phone with the rest of the page, and prints. Blank the title,
+or type the box's own name back, and the month stops renaming it. One box
+cannot take another's name -- a note with two `## Tasks` would hand one box
+the other's lines -- so that is refused.
+
+Months written before a box was renamed keep the heading they were written
+under: a September whose third box says `## Grateful for` still says so,
+with its lines, and it is the month that decides whether it becomes Fitness.
 
 They are stored in the same monthly note, under `## ` headings after the days:
 
@@ -189,6 +201,23 @@ of the entry; a calendar wants a structured start and end:
 
 A time with no `am` or `pm` is read as a 24-hour clock, so `5:30 dinner` is
 half past five in the *morning*. Write `5:30 pm` or `17:30` for the evening.
+
+A time in the note is a wall clock, not an instant: `1 pm lunch` is 1 pm on
+that date wherever you are. Google Calendar has no such thing -- every timed
+event is fixed to a zone, and the phone shows it converted to wherever the
+phone is, so 1 pm stamped in Los Angeles would read 4 am in Beijing. The sync
+makes up for it by moving the stamp: events are stamped with the machine's
+zone, compared by wall clock, and when the zone here changes every event is
+restamped to the same wall clock in the new one, on the next sync. Take the
+laptop along and the phone keeps showing 1 pm. Leave it at home and the
+phone shows home time until you set the zone yourself, in
+`~/.config/omarchy/journal/config.json`:
+
+```json
+{ "timezone": "Asia/Shanghai" }
+```
+
+`journal-sync status` shows the zone in use.
 
 ### One line, several entries
 
@@ -340,7 +369,7 @@ tell, the event is left alone and written to
 
 ### The facing page
 
-**Focus**, **Tasks**, **Grateful for** and **Notes** have no counterpart in a
+**Focus**, **Tasks**, **Fitness** and **Notes** have no counterpart in a
 calendar -- there is no event they could sensibly become. So they travel
 together, in the description of a single all-day event on the 1st of the
 month, titled `September 2026 notes`. Tap it on your phone and the four boxes
@@ -361,7 +390,7 @@ unresolvable clash is written to `conflicts.log` rather than guessed at.
 
 One asymmetry is deliberate. Deleting the carrier event on your phone does not
 clear the boxes -- the next sync puts it back from the note. The note is the
-record and the event only how it travels, so losing a month of Grateful to a
+record and the event only how it travels, so losing a month's boxes to a
 stray swipe would be a poor price for symmetry with the day log. To empty a
 box, empty it.
 

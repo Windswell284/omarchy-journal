@@ -262,11 +262,30 @@ def replace_day(text, day, new_text):
 # in the note as `## ` headings, and `was` lists headings a box used to be
 # written under, so renaming one migrates its contents instead of dropping them.
 SECTIONS = [
-    ("focus",    "Focus",        ("Goals / Focus",)),
-    ("tasks",    "Tasks",        ()),
-    ("grateful", "Grateful for", ("Grateful",)),
-    ("notes",    "Notes",        ("Next Month",)),
+    ("focus",   "Focus",   ("Goals / Focus",)),
+    ("tasks",   "Tasks",   ()),
+    ("fitness", "Fitness", ()),
+    ("notes",   "Notes",   ("Next Month",)),
 ]
+
+
+def title_key(sid):
+    """Model.js's titleKey: where a month's own name for a box rides.
+
+    It sits in the sections map beside the body, so the sync, the state file
+    and the calendar carrier all carry it without knowing it is there.
+    """
+    return sid + ":title"
+
+
+def default_title(sid):
+    return next((name for i, name, _ in SECTIONS if i == sid), sid)
+
+
+def section_title(sections, sid):
+    """The heading a box is written under this month: its own, or the default."""
+    custom = (sections or {}).get(title_key(sid)) or ""
+    return str(custom) if str(custom).strip() else default_title(sid)
 
 BULLET_RE = re.compile(r"^\s*[-*+•]\s+")
 _BR_RE = re.compile(r"<br\s*/?>|</p\s*>|</div\s*>", re.I)
@@ -303,19 +322,32 @@ def parse_sections(text):
     about a blank line would have the two rewriting each other's work forever.
     Interior blanks are kept, edge ones trimmed, and the bullet marker stripped
     -- it is punctuation the serializer puts back, not content.
+
+    A heading that is a box's own name, or an old one, claims that box. The
+    rest claim whichever boxes are left, in the order written, and are kept
+    as the month's names for them under `title_key`. Headings beyond the
+    four are dropped.
     """
-    out, current, buf = {}, "", []
+    blocks, current = [], None
     for line in str(text or "").splitlines():
         m = SECTION_RE.match(line)
         if m:
-            if current:
-                out[current] = _trim_blank(buf)
-            buf, current = [], section_id_for_title(m.group(1))
+            current = (m.group(1), [])
+            blocks.append(current)
         elif current:
-            buf.append(BULLET_RE.sub("", line))
-    if current:
-        out[current] = _trim_blank(buf)
-    out.pop("", None)                   # a heading none of the boxes claims
+            current[1].append(BULLET_RE.sub("", line))
+    out, claimed, strays = {}, set(), []
+    for title, lines in blocks:
+        sid = section_id_for_title(title)
+        if sid:
+            out[sid] = _trim_blank(lines)
+            claimed.add(sid)
+        else:
+            strays.append((title, lines))
+    free = [sid for sid, _, _ in SECTIONS if sid not in claimed]
+    for (title, lines), sid in zip(strays, free):
+        out[sid] = _trim_blank(lines)
+        out[title_key(sid)] = title
     return out
 
 
@@ -329,8 +361,8 @@ def section_lines(sections):
     heading you cannot type under.
     """
     lines = []
-    for sid, title, _was in SECTIONS:
-        lines += ["", "## " + title, ""]
+    for sid, _title, _was in SECTIONS:
+        lines += ["", "## " + section_title(sections, sid), ""]
         body = str((sections or {}).get(sid) or "")
         if body:
             lines += ["" if line == "" else "- " + BULLET_RE.sub("", line)

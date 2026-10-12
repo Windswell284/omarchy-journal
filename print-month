@@ -15,7 +15,7 @@ import argparse, calendar, datetime, html, os, re, shutil, subprocess, sys, temp
 DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]          # Sunday-indexed
 # (title, column, row, old titles still accepted in existing notes)
 SECTIONS = [("Focus", 0, 0, ("Goals / Focus",)), ("Tasks", 1, 0, ()),
-            ("Grateful for", 0, 1, ("Grateful",)),
+            ("Fitness", 0, 1, ()),
             ("Notes", 1, 1, ("Next Month",))]
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
 
@@ -51,9 +51,11 @@ def layout(pad):
     """
     grid_h = PAGE_H - 2 * pad
     pitch = (grid_h - TITLE_H - RULE_H - RULE_GAP) / 31.0
-    r0_h, r1_h = grid_h * .56, grid_h * .40
+    # The split between the rows, then two lines handed down from the top
+    # row to the bottom one, the same as the panel does.
+    r0_h, r1_h = grid_h * .56 - 2 * pitch, grid_h * .40 + 2 * pitch
     return dict(
-        pad=pad, pitch=pitch, grid_h=grid_h,
+        pad=pad, pitch=pitch, grid_h=grid_h, r0_h=r0_h, r1_h=r1_h,
         r0_lines=int((r0_h - R0_TITLE - RULE_H - RULE_GAP) / pitch),
         r1_lines=int((r1_h - R1_TITLE - RULE_H - RULE_GAP) / pitch))
 LINE_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?\s*(\d{1,2})\s*[A-Za-z]?\s*(?:\*\*)?\s*(.*?)\s*$")
@@ -102,14 +104,27 @@ def parse(path):
     return days, sections
 
 
-def section_body(sections, title, was=()):
-    """Match headings loosely, the way the plugin does, old names included."""
+def assign(sections):
+    """[(label, body)] per box, read the way the plugin reads a note.
+
+    A heading that is a box's own name (or an old one) claims that box; the
+    rest claim the boxes left over, in order, and are printed under the name
+    the month gave them -- a month that called Fitness "Reading" prints
+    Reading.
+    """
     norm = lambda t: re.sub(r"[\s/]+", "", t).lower()
-    wanted = {norm(t) for t in (title,) + tuple(was)}
+    out, strays = {}, []
     for key, body in sections.items():
-        if norm(key) in wanted:
-            return body
-    return ""
+        for i, (name, _col, _row, was) in enumerate(SECTIONS):
+            if norm(key) in {norm(t) for t in (name,) + tuple(was)}:
+                out[i] = (name, body)
+                break
+        else:
+            strays.append((key, body))
+    free = [i for i in range(len(SECTIONS)) if i not in out]
+    for (key, body), i in zip(strays, free):
+        out[i] = (key, body)
+    return [out.get(i, (SECTIONS[i][0], "")) for i in range(len(SECTIONS))]
 
 
 def build_html(year, month, days, sections, blank, geo):
@@ -126,8 +141,9 @@ def build_html(year, month, days, sections, blank, geo):
                 heavy=" wk" if dow == 6 else "", d=day, l=DAY_LETTERS[dow], t=entry))
 
     boxes = []
-    for name, col, row, was in SECTIONS:
-        body = "" if blank else section_body(sections, name, was)
+    for (_name, col, row, _was), (name, body) in zip(SECTIONS, assign(sections)):
+        if blank:
+            body = ""
         written = body.split("\n") if body else []
         # Every line of the box is emitted, written or not: a printed box has
         # to arrive already ruled, and a background gradient does not survive
@@ -152,6 +168,7 @@ def build_html(year, month, days, sections, blank, geo):
         sheety=round((SHEET_H - PAGE_H) / 2, 4),
         pitch=round(geo["pitch"], 4), gap=RULE_GAP, r0title=round(R0_TITLE, 4),
         gridh=round(geo["grid_h"], 4),
+        r0h=round(geo["r0_h"], 4), r1h=round(geo["r1_h"], 4),
         titlept=TITLE_PT, labelpt=LABEL_PT, bodypt=BODY_PT)
 
 
@@ -192,8 +209,8 @@ TEMPLATE = """<!doctype html><meta charset="utf-8"><style>
   .grid {{ height: {gridh}in; display: flex; flex-wrap: wrap;
            align-content: space-between; }}
   .box {{ width: 48%; display: flex; flex-direction: column; }}
-  .box.r0 {{ height: 56%; }}
-  .box.r1 {{ height: 40%; }}
+  .box.r0 {{ height: {r0h}in; }}
+  .box.r1 {{ height: {r1h}in; }}
   .box.c0 {{ margin-right: 4%; }}
   /* The top row's heading occupies exactly the band the month title does on
      the other page, so the rule beneath it lands on the same line -- one cut

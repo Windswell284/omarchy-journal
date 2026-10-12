@@ -117,12 +117,13 @@ Panel {
   readonly property string headMonthKey: Model.monthKey(headYear, headMonth)
 
   // Focus and Tasks carry the month's thinking and take the taller row;
-  // Grateful and Notes are shorter by nature and sit under them.
+  // Fitness and Notes sit under them. Titles come from Model.SECTIONS, or
+  // from the month itself when it has renamed a box.
   readonly property var sectionLayout: [
-    { id: "focus",    title: "Focus",         col: 0, row: 0 },
-    { id: "tasks",    title: "Tasks",         col: 1, row: 0 },
-    { id: "grateful", title: "Grateful for",  col: 0, row: 1 },
-    { id: "notes",    title: "Notes",         col: 1, row: 1 }
+    { id: "focus",   col: 0, row: 0 },
+    { id: "tasks",   col: 1, row: 0 },
+    { id: "fitness", col: 0, row: 1 },
+    { id: "notes",   col: 1, row: 1 }
   ]
 
   // ---- Cursor. `cursorIndex` indexes `days`; `editing` is whether that row
@@ -214,11 +215,33 @@ Panel {
     setSection(monthKey, id, lines.join("\n"))
   }
 
+  // What a box is called this month: its own name, or the one the month gave
+  // it. Stored under Model.titleKey(id) in the same map as the bodies, so the
+  // month's names are saved, loaded and synced along with its lines.
+  function sectionTitleFor(monthKey, id) {
+    var custom = sectionFor(monthKey, Model.titleKey(id))
+    return custom.replace(/\s/g, "") === "" ? Model.defaultTitle(id) : custom
+  }
+
+  // Blank, or the box's own name however it is cased, means "not renamed":
+  // the default is what gets written. Another box's name is refused, since
+  // a note read back with two boxes called Tasks would hand one the other's
+  // lines.
+  function setSectionTitle(monthKey, id, text) {
+    if (root.loading) return
+    var title = text.replace(/^\s+|\s+$/g, "")
+    var owner = Model.sectionIdForTitle(title)
+    if (owner !== "" && owner !== id) return
+    setSection(monthKey, Model.titleKey(id), owner === id ? "" : title)
+  }
+
   function sectionsOf(monthKey) {
     var out = ({})
     for (var i = 0; i < Model.SECTIONS.length; i++) {
       var id = Model.SECTIONS[i].id
       out[id] = sectionFor(monthKey, id)
+      var title = sectionFor(monthKey, Model.titleKey(id))
+      if (title !== "") out[Model.titleKey(id)] = title
     }
     return out
   }
@@ -244,6 +267,8 @@ Panel {
       var id = Model.SECTIONS[i].id
       var body = parsed.sections[id]
       root.sectionText[sectionSlot(key, id)] = body === undefined ? "" : body
+      var title = parsed.sections[Model.titleKey(id)]
+      root.sectionText[sectionSlot(key, Model.titleKey(id))] = title === undefined ? "" : title
     }
     root.existingMonths[key] = text !== null
     root.loading = false
@@ -1041,7 +1066,11 @@ Panel {
         readonly property int colGap: Style.space(14)
         readonly property int rowGap: Style.space(16)
         readonly property int colWidth: Math.floor((width - colGap) / 2)
+        // The page's split between the rows, then two lines handed down from
+        // the top row to the bottom one: Focus and Tasks run a little shorter
+        // than their share, Fitness and Notes a little longer.
         readonly property int topHeight: Math.round((height - rowGap) * 0.58)
+          - 2 * root.rowHeight
         readonly property int bottomHeight: height - rowGap - topHeight
 
         Repeater {
@@ -1098,16 +1127,69 @@ Panel {
             width: rightPage.colWidth
             height: box.modelData.row === 0 ? rightPage.topHeight : rightPage.bottomHeight
 
-            Text {
+            // The title is a field, so a month can call the box what it
+            // likes: click it and type. Shown in capitals but stored as typed,
+            // since the name goes into the note as a heading. Blank it, or
+            // type the box's own name back, and the month is no longer
+            // renaming it.
+            TextInput {
               id: boxTitle
               anchors.bottom: boxRule.top
               anchors.bottomMargin: Style.space(5)
               anchors.left: parent.left
-              text: box.modelData.title.toUpperCase()
+              anchors.right: parent.right
+              clip: true
               font.family: root.fontFamily
               font.pixelSize: Style.font.subtitle
               font.letterSpacing: Style.space(1)
+              font.capitalization: Font.AllUppercase
               color: root.sectionTitleColor
+              selectByMouse: true
+              selectionColor: Style.selectionFill
+              selectedTextColor: root.fg
+              activeFocusOnPress: true
+
+              property bool syncing: false
+              property string monthNow: root.headMonthKey
+              property int rev: root.revision
+
+              function reload() {
+                boxTitle.syncing = true
+                boxTitle.text = root.sectionTitleFor(root.headMonthKey, box.modelData.id)
+                boxTitle.syncing = false
+              }
+
+              onMonthNowChanged: boxTitle.reload()
+              onRevChanged: boxTitle.reload()
+              Component.onCompleted: boxTitle.reload()
+
+              onTextChanged: if (!boxTitle.syncing)
+                root.setSectionTitle(root.headMonthKey, box.modelData.id, boxTitle.text)
+              onActiveFocusChanged: {
+                if (boxTitle.activeFocus) {
+                  root.editingSection = true
+                  root.editing = false
+                } else {
+                  // A blank, or a name that was refused, settles back to
+                  // whatever is actually stored.
+                  boxTitle.reload()
+                }
+              }
+
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Escape) {
+                  root.stopSectionEditing()
+                  event.accepted = true
+                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                           || event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                  if (event.key === Qt.Key_Tab && root.steppingBack(event)) box.stepBox(-1)
+                  else box.focusLine(0)
+                  event.accepted = true
+                } else if (event.key === Qt.Key_Backtab) {
+                  box.stepBox(-1)
+                  event.accepted = true
+                }
+              }
             }
 
             // Positioned first, with the title hung above it, so the rule is

@@ -24,18 +24,42 @@ var MONTHS = ["January", "February", "March", "April", "May", "June",
 var DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]
 
 // The facing page. Ids are internal; titles are what land in the note as "## "
-// headings and what the panel labels each box with.
+// headings and what the panel labels each box with, unless a month has given
+// the box a name of its own (see titleKey below).
 // `was` lists headings a section used to be written under. A note carrying an
 // old heading is read into the same section and rewritten under the new one, so
 // renaming a box migrates its contents instead of dropping them.
 var SECTIONS = [
-  { id: "focus",    title: "Focus",         was: ["Goals / Focus"] },
-  { id: "tasks",    title: "Tasks",         was: [] },
-  { id: "grateful", title: "Grateful for",  was: ["Grateful"] },
-  { id: "notes",    title: "Notes",         was: ["Next Month"] }
+  { id: "focus",   title: "Focus",   was: ["Goals / Focus"] },
+  { id: "tasks",   title: "Tasks",   was: [] },
+  { id: "fitness", title: "Fitness", was: [] },
+  { id: "notes",   title: "Notes",   was: ["Next Month"] }
 ]
 
 var SECTION_RE = /^##\s+(.+?)\s*$/
+
+// A month can call a box what it likes. The heading in the note is the name:
+// one that is not a box's own (or old) name is kept as that month's name for
+// it and written back as it was read. It rides in the sections map beside the
+// body, under this key, so everything that carries a month's boxes -- the
+// panel, the sync, the calendar carrier -- carries its names too without
+// having to know. Absent or blank means the box's own name.
+function titleKey(id) {
+  return id + ":title"
+}
+
+function defaultTitle(id) {
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].id === id) return SECTIONS[i].title
+  }
+  return id
+}
+
+function sectionTitle(sections, id) {
+  var custom = sections ? sections[titleKey(id)] : ""
+  if (custom && String(custom).replace(/\s/g, "") !== "") return String(custom)
+  return defaultTitle(id)
+}
 
 function pad2(n) {
   return n < 10 ? "0" + n : String(n)
@@ -135,7 +159,7 @@ function serializeMonth(year, month, entries, sections) {
   for (var i = 0; i < SECTIONS.length; i++) {
     var text = sections && sections[SECTIONS[i].id] ? String(sections[SECTIONS[i].id]) : ""
     lines.push("")
-    lines.push("## " + SECTIONS[i].title)
+    lines.push("## " + sectionTitle(sections, SECTIONS[i].id))
     lines.push("")
     if (text) {
       var body = text.split("\n")
@@ -197,23 +221,46 @@ function stripBullet(line) {
   return String(line).replace(BULLET_RE, "")
 }
 
+// A heading that is a box's own name, or an old one, claims that box. The
+// rest claim whichever boxes are left, in the order they are written, and are
+// kept as the month's names for them -- so "## Reading" in a note whose other
+// three headings are the usual ones lands in the fourth box, called Reading.
+// Headings beyond the four are dropped, as they always were.
 function parseSections(text) {
   var out = {}
   if (!text) return out
   var lines = String(text).split("\n")
-  var current = ""
-  var buffer = []
+  var blocks = []
+  var current = null
   for (var i = 0; i < lines.length; i++) {
     var heading = SECTION_RE.exec(lines[i])
     if (heading) {
-      if (current) out[current] = trimBlank(buffer)
-      buffer = []
-      current = sectionIdForTitle(heading[1])
+      current = { title: heading[1], lines: [] }
+      blocks.push(current)
     } else if (current) {
-      buffer.push(stripBullet(lines[i]))
+      current.lines.push(stripBullet(lines[i]))
     }
   }
-  if (current) out[current] = trimBlank(buffer)
+  var claimed = {}
+  var strays = []
+  for (var b = 0; b < blocks.length; b++) {
+    var id = sectionIdForTitle(blocks[b].title)
+    if (id) {
+      out[id] = trimBlank(blocks[b].lines)
+      claimed[id] = true
+    } else {
+      strays.push(blocks[b])
+    }
+  }
+  var k = 0
+  for (var s = 0; s < strays.length; s++) {
+    while (k < SECTIONS.length && claimed[SECTIONS[k].id]) k++
+    if (k >= SECTIONS.length) break
+    var slot = SECTIONS[k].id
+    claimed[slot] = true
+    out[slot] = trimBlank(strays[s].lines)
+    out[titleKey(slot)] = strays[s].title
+  }
   return out
 }
 
@@ -266,9 +313,12 @@ function monthHasContent(year, month, entries, sections) {
     var value = entries[dateKey(year, month, day)]
     if (value && String(value).length > 0) return true
   }
+  // A renamed box counts as content: the name is something the month said.
   for (var i = 0; i < SECTIONS.length; i++) {
     var text = sections ? sections[SECTIONS[i].id] : ""
     if (text && String(text).length > 0) return true
+    var title = sections ? sections[titleKey(SECTIONS[i].id)] : ""
+    if (title && String(title).replace(/\s/g, "") !== "") return true
   }
   return false
 }

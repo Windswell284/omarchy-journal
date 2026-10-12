@@ -22,6 +22,7 @@ VAULT = os.path.join(TMP, "vault"); os.makedirs(VAULT)
 for name in ("CONFIG", "GLOSSARY", "STATE", "TOKEN", "CONFLICTS"):
     setattr(JS, name, os.path.join(TMP, os.path.basename(getattr(JS, name))))
 JS.vault_dir = lambda: VAULT
+JS._local_tz = lambda: "America/Los_Angeles"     # whatever this machine says
 
 NOTE = """# September 2026
 
@@ -64,6 +65,11 @@ class FakeEvents:
         def go():
             e = dict(body, id=eventId, updated=stamp())
             self.store[eventId] = e
+            return e
+        return Req(go)
+    def patch(self, calendarId, eventId, body):
+        def go():
+            e = self.store[eventId]; e.update(body); e["updated"] = stamp()
             return e
         return Req(go)
     def delete(self, calendarId, eventId):
@@ -119,6 +125,27 @@ SVC.events().insert("cal1", {"summary": "Rolling Hills Country Club",
                              "end": {"dateTime": "2026-09-04T18:30:00-07:00"}}).execute()
 run("   sync"); show_note()
 run("8. sync again (no-op)")
+
+def timed():
+    return {e["summary"]: e["start"] for e in SVC.store.values() if "dateTime" in e["start"]}
+def wall(st):
+    return st["dateTime"][:16]
+print("\n### 8b. the laptop goes to Beijing: every stamp follows, no wall clock moves")
+before = {k: wall(v) for k, v in timed().items()}
+JS._local_tz = lambda: "Asia/Shanghai"
+run("   sync"); show_note()
+after = timed()
+assert {k: wall(v) for k, v in after.items()} == before, (before, after)
+assert all(v["dateTime"].endswith("+08:00") and v["timeZone"] == "Asia/Shanghai"
+           for v in after.values()), after
+assert "5 pm PIA, 5:30 pm Rolling Hills Country Club" in open(f"{VAULT}/2026-09.md").read()
+run("8c. sync again (must be a no-op)")
+print("\n### 8d. and home again")
+JS._local_tz = lambda: "America/Los_Angeles"
+run("   sync")
+assert all(v["dateTime"].endswith("-07:00") for v in timed().values()), timed()
+assert {k: wall(v) for k, v in timed().items()} == before
+run("8e. sync again (no-op)")
 print("\n### 9. delete a line from the note (David on the 2nd)")
 t = open(f"{VAULT}/2026-09.md").read().replace(", 2:15 pm David", "")
 open(f"{VAULT}/2026-09.md", "w").write(t)
@@ -134,10 +161,10 @@ def show_page():
 
 print("\n### 11. the facing page rode out with the first sync")
 show_page()
-print("\n### 12. add a Grateful line on the phone, in the event description")
+print("\n### 12. add a Fitness line on the phone, in the event description")
 c = carrier()
 c.update(description=c["description"].replace(
-    "## Grateful for\n", "## Grateful for\n\n- the rain\n"), updated=stamp())
+    "## Fitness\n", "## Fitness\n\n- the rain\n"), updated=stamp())
 run("   sync"); show_page()
 run("13. sync again (must be a no-op)")
 print("\n### 14. edit the note: another Focus line")
@@ -146,6 +173,21 @@ open(f"{VAULT}/2026-09.md", "w").write(t)
 os.utime(f"{VAULT}/2026-09.md", (2e9, 2e9))     # newer than any fake event
 run("   sync"); show_page()
 run("15. sync again (no-op)")
+print("\n### 15b. rename a box in the note: this month, Fitness is Reading")
+t = open(f"{VAULT}/2026-09.md").read().replace("## Fitness\n", "## Reading\n")
+open(f"{VAULT}/2026-09.md", "w").write(t)
+os.utime(f"{VAULT}/2026-09.md", (2.1e9, 2.1e9))
+run("   sync"); show_page()
+assert "## Reading\n\n- the rain" in carrier()["description"], carrier()["description"]
+run("15c. sync again (must be a no-op)")
+assert "## Reading\n" in open(f"{VAULT}/2026-09.md").read()
+print("\n### 15d. and back to Fitness, from the phone")
+c = carrier()
+c.update(description=c["description"].replace("## Reading\n", "## Fitness\n"), updated=stamp())
+run("   sync"); show_page()
+note = open(f"{VAULT}/2026-09.md").read()
+assert "## Fitness\n\n- the rain" in note and "Reading" not in note, note
+run("15e. sync again (no-op)")
 print("\n### 16. delete the carrier on the phone -- the boxes must survive")
 SVC.store.pop(carrier()["id"])
 run("   sync"); show_page()

@@ -155,7 +155,7 @@ def _resolve(prefer, s, g, note_mtime):
 
 # --- the facing page --------------------------------------------------------
 #
-# Focus, Tasks, Grateful and Notes have no counterpart in a calendar, so they
+# Focus, Tasks, Fitness and Notes have no counterpart in a calendar, so they
 # ride together in the description of one all-day event on the 1st. That makes
 # them a single value rather than a list to match up: there is no per-line
 # pairing to get wrong, and no question about which box moved -- the block
@@ -183,7 +183,7 @@ def plan_sections(note, gcal, state, prefer="newer", note_mtime=None):
     if gcal is None:
         # No carrier. A deleted one is remade from the note rather than read as
         # an instruction to clear the boxes: the note is the record and the
-        # event only how it travels, so losing a month's Grateful to a stray
+        # event only how it travels, so losing a month's boxes to a stray
         # swipe on a phone would be a poor price for symmetry with the day log.
         return [Action("sections-push", None, {"sections": n, "id": None})] if n else []
 
