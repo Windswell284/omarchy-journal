@@ -33,7 +33,7 @@ var SECTIONS = [
   { id: "focus",   title: "Focus",   was: ["Goals / Focus"] },
   { id: "tasks",   title: "Tasks",   was: [] },
   { id: "fitness", title: "Fitness", was: [] },
-  { id: "notes",   title: "Notes",   was: ["Next Month"] }
+  { id: "notes",   title: "To-Do",   was: ["Next Month"] }
 ]
 
 var SECTION_RE = /^##\s+(.+?)\s*$/

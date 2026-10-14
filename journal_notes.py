@@ -265,7 +265,7 @@ SECTIONS = [
     ("focus",   "Focus",   ("Goals / Focus",)),
     ("tasks",   "Tasks",   ()),
     ("fitness", "Fitness", ()),
-    ("notes",   "Notes",   ("Next Month",)),
+    ("notes",   "To-Do",   ("Next Month",)),
 ]
 
 

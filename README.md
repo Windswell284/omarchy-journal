@@ -84,7 +84,7 @@ lands on the 4th. Bullets that do not start with a day number are left alone.
 | `{` / `}` | Previous / next year |
 | `1` `2` `3` `4` | Jump into a facing-page box |
 | `Enter` / `Up` / `Down` | Move between lines inside a box |
-| `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Fitness, Notes, wrapping |
+| `Tab` / `Shift+Tab` | Next / previous section — the day log, then Focus, Tasks, Fitness, To-Do, wrapping |
 | `p` | Print the month on screen as a cut-out spread |
 | `s` | Sync with Google Calendar now |
 
@@ -126,7 +126,7 @@ o.bind("SUPER + M", "Monthly calendar", "omarchy-shell pyang.journal toggle")
 ## The facing page
 
 A monthly spread is two pages. The right one holds four boxes for the month as
-a whole -- Focus and Tasks on the taller top row, Fitness and Notes
+a whole -- Focus and Tasks on the taller top row, Fitness and To-Do
 beneath. Both pages are up whenever the panel is: the spread is the unit, and
 there is no one-page state to fold back to. The boxes follow whichever month
 the heading names.
@@ -369,7 +369,7 @@ tell, the event is left alone and written to
 
 ### The facing page
 
-**Focus**, **Tasks**, **Fitness** and **Notes** have no counterpart in a
+**Focus**, **Tasks**, **Fitness** and **To-Do** have no counterpart in a
 calendar -- there is no event they could sensibly become. So they travel
 together, in the description of a single all-day event on the 1st of the
 month, titled `September 2026 notes`. Tap it on your phone and the four boxes
