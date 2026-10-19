@@ -155,6 +155,10 @@ They are stored in the same monthly note, under `## ` headings after the days:
 - 3 emails to send
 ```
 
+A box is a list with no gaps. Empty a line and leave it, and the lines below
+move up; Backspace on an empty line deletes it and goes to the end of the one
+above. Clicking a rule below the list starts on the first free line.
+
 Section lines are stored as Markdown list items, so they render as a list in
 Obsidian. The marker is punctuation rather than content: it is stripped on the
 way in and put back on the way out, so it never doubles up, and a line typed

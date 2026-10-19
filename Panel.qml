@@ -215,6 +215,27 @@ Panel {
     setSection(monthKey, id, lines.join("\n"))
   }
 
+  // A box is a list, not a page of rules: a line emptied out is gone, and
+  // the ones under it close up. The revision bump makes the fields re-read
+  // their lines, since the same index now holds a different one.
+  function removeSectionLine(monthKey, id, index) {
+    if (root.loading) return
+    var lines = sectionLines(monthKey, id)
+    if (index < 0 || index >= lines.length) return
+    lines.splice(index, 1)
+    setSection(monthKey, id, lines.join("\n"))
+    root.revision += 1
+  }
+
+  function compactSection(monthKey, id) {
+    if (root.loading) return
+    var lines = sectionLines(monthKey, id)
+    var kept = lines.filter(function(line) { return line.replace(/\s/g, "") !== "" })
+    if (kept.length === lines.length) return
+    setSection(monthKey, id, kept.join("\n"))
+    root.revision += 1
+  }
+
   // What a box is called this month: its own name, or the one the month gave
   // it. Stored under Model.titleKey(id) in the same map as the bodies, so the
   // month's names are saved, loaded and synced along with its lines.
@@ -1103,13 +1124,21 @@ Panel {
               box.storedCount + 1,
               box.grown)
 
-            function focusLine(index) {
+            function focusLine(index, atEnd) {
               if (index < 0) return
               if (index >= box.lineSlots) box.grown = index + 1
               Qt.callLater(function() {
                 var row = lineList.itemAtIndex(index)
-                if (row && row.field) row.field.forceActiveFocus()
+                if (!row || !row.field) return
+                row.field.forceActiveFocus()
+                if (atEnd) row.field.cursorPosition = row.field.text.length
               })
+            }
+
+            // An empty line that isn't the last one: leaving it removes it.
+            function isGap(index) {
+              var lines = root.sectionLines(root.headMonthKey, box.modelData.id)
+              return index < lines.length && lines[index].replace(/\s/g, "") === ""
             }
 
             // Tab walks the boxes in the order they are written and, off
@@ -1284,21 +1313,50 @@ Panel {
                     onTextChanged: if (!lineField.syncing)
                       root.setSectionLine(root.headMonthKey, box.modelData.id,
                                           lineRow.index, lineField.text)
-                    onActiveFocusChanged: if (lineField.activeFocus) {
-                      root.editingSection = true
-                      root.editing = false
+                    onActiveFocusChanged: {
+                      if (lineField.activeFocus) {
+                        root.editingSection = true
+                        root.editing = false
+                        // Clicking a rule below the list lands on the first
+                        // free line, so nothing is ever written past a gap.
+                        var count = root.sectionLines(root.headMonthKey,
+                                                      box.modelData.id).length
+                        if (lineRow.index > count) box.focusLine(count)
+                      } else {
+                        // Leaving by click, Esc or Tab: close up any line
+                        // that was emptied out.
+                        root.compactSection(root.headMonthKey, box.modelData.id)
+                      }
                     }
 
                     Keys.onPressed: function(event) {
+                      var gap = box.isGap(lineRow.index)
                       if (event.key === Qt.Key_Escape) {
                         root.stopSectionEditing()
                         event.accepted = true
                       } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                                  || event.key === Qt.Key_Down) {
-                        box.focusLine(lineRow.index + 1)
+                        // The line below moves up into this one.
+                        if (gap) {
+                          root.removeSectionLine(root.headMonthKey, box.modelData.id, lineRow.index)
+                          box.focusLine(lineRow.index)
+                        } else {
+                          box.focusLine(lineRow.index + 1)
+                        }
                         event.accepted = true
                       } else if (event.key === Qt.Key_Up) {
+                        if (gap) root.removeSectionLine(root.headMonthKey, box.modelData.id, lineRow.index)
                         box.focusLine(lineRow.index - 1)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Backspace && lineField.text === ""
+                                 && lineRow.index > 0) {
+                        // Backspace on an empty line deletes it, like a list.
+                        root.removeSectionLine(root.headMonthKey, box.modelData.id, lineRow.index)
+                        box.focusLine(lineRow.index - 1, true)
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Delete && lineField.text === "" && gap) {
+                        root.removeSectionLine(root.headMonthKey, box.modelData.id, lineRow.index)
+                        box.focusLine(lineRow.index)
                         event.accepted = true
                       } else if (event.key === Qt.Key_Tab
                                  || event.key === Qt.Key_Backtab) {
