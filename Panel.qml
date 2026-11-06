@@ -628,9 +628,9 @@ Panel {
     // cartridges side by side. So this is one round -- ogive nose up over a
     // straight case, sized off the icon canvas so it tracks the bar's scale.
     iconComponent: Component {
+      // No anchors: BarIconContent sizes an unsized wrapper to the icon
+      // canvas itself, and anchors.fill would pin it to its 0x0 Loader.
       Item {
-        anchors.fill: parent
-
         Shape {
           id: bullet
           anchors.centerIn: parent
